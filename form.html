@@ -1,28 +1,14 @@
-<div id="iframe-container"></div>
+<head>
+  <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-PMFXCLW9');</script>
+<!-- End Google Tag Manager -->
+</head>
+<body>
+  <div id="iframe-container"></div>
+</body>
 
-<script>
-  (function() {
-    // URL gốc (có thể đã có sẵn query params)
-    const baseUrl = "https://stg.form.run/embed/@thanh-IQ4AfmguPhrqLygp0AbB?embed=direct";
 
-    // Lấy params từ URL hiện tại
-    const currentParams = window.location.search;
-
-    // Nếu baseUrl đã có "?" thì nối bằng "&", nếu chưa thì nối bằng "?"
-    const joiner = baseUrl.includes("?") ? "&" : "?";
-
-    // Nếu không có params hiện tại thì giữ nguyên baseUrl
-    const iframeUrl = currentParams 
-      ? baseUrl + joiner + currentParams.substring(1) 
-      : baseUrl;
-
-    // Tạo iframe
-    const iframe = document.createElement("iframe");
-    iframe.src = iframeUrl;
-    iframe.width = "100%";
-    iframe.height = "600";
-    iframe.style.border = "0";
-
-    document.getElementById("iframe-container").appendChild(iframe);
-  })();
-</script>
