@@ -1,0 +1,28 @@
+<div id="iframe-container"></div>
+
+<script>
+  (function() {
+    // URL gốc (có thể đã có sẵn query params)
+    const baseUrl = "https://stg.form.run/embed/@thanh-IQ4AfmguPhrqLygp0AbB?embed=direct";
+
+    // Lấy params từ URL hiện tại
+    const currentParams = window.location.search;
+
+    // Nếu baseUrl đã có "?" thì nối bằng "&", nếu chưa thì nối bằng "?"
+    const joiner = baseUrl.includes("?") ? "&" : "?";
+
+    // Nếu không có params hiện tại thì giữ nguyên baseUrl
+    const iframeUrl = currentParams 
+      ? baseUrl + joiner + currentParams.substring(1) 
+      : baseUrl;
+
+    // Tạo iframe
+    const iframe = document.createElement("iframe");
+    iframe.src = iframeUrl;
+    iframe.width = "100%";
+    iframe.height = "600";
+    iframe.style.border = "0";
+
+    document.getElementById("iframe-container").appendChild(iframe);
+  })();
+</script>
