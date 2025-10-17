@@ -1,41 +1,38 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
   <meta charset="UTF-8">
-  <title>Trang đơn giản</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      text-align: center;
-      padding-top: 100px;
-      background: #f9f9f9;
-    }
-    a.button {
-      display: inline-block;
-      margin: 20px;
-      padding: 20px 40px;
-      font-size: 20px;
-      font-weight: bold;
-      text-decoration: none;
-      color: white;
-      background: #007BFF;
-      border-radius: 10px;
-      transition: background 0.3s;
-    }
-    a.button:hover {
-      background: #0056b3;
-    }
-    a.button.secondary {
-      background: #28a745;
-    }
-    a.button.secondary:hover {
-      background: #1e7e34;
-    }
-  </style>
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="ai_assistant">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>ai_assistant</title>
+  <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <h1>テスト</h1>
-  <a href="https://thanhbk55.github.io/page/form?_field_7[]=選択肢1" class="button">ページ１</a>
-  <a href="https://thanhbk55.github.io/page/form?_field_7[]=選択肢2" class="button secondary">ページ２</a>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
