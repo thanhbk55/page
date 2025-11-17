@@ -3,90 +3,204 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nạp Firmware ESP32</title>
-  <script src="https://unpkg.com/esptool-js/dist/bundle.js"></script>
+  <title>Nạp Firmware ESP32 qua WebSerial</title>
+
+  <!-- Bundle chính thức của esptool-js -->
+  <script src="https://unpkg.com/esptool-js/bundle.js"></script>
+
   <style>
     body {
-      font-family: sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       max-width: 600px;
       margin: 40px auto;
       padding: 20px;
       background: #f5f5f5;
     }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
     button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin-top: 10px;
+      padding: 8px 16px;
+      font-size: 14px;
+      margin: 4px 4px 4px 0;
       cursor: pointer;
     }
     #log {
       white-space: pre-wrap;
       background: #fff;
       padding: 10px;
-      margin-top: 20px;
+      margin-top: 16px;
       border: 1px solid #ccc;
-      height: 200px;
+      height: 260px;
       overflow-y: auto;
+      font-size: 12px;
+    }
+    input[type="file"] {
+      margin: 8px 0;
+    }
+    .hint {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 8px;
     }
   </style>
 </head>
 <body>
-  <h2>Nạp Firmware ESP32 qua Web Serial</h2>
+  <h1>Nạp Firmware ESP32-S3</h1>
+  <p class="hint">
+    ⚠ Mở trang này bằng <b>Chrome</b> trên <code>http://localhost</code> (không phải <code>file://</code>).
+  </p>
 
-  <input type="file" id="firmware" accept=".bin" />
-  <br/><br/>
-  <button id="connect">Kết nối thiết bị</button>
-  <button id="flash">Nạp firmware</button>
+  <div>
+    <label>Firmware (.bin): </label>
+    <input type="file" id="firmware" accept=".bin" />
+  </div>
+
+  <button id="connect">1️⃣ Kết nối ESP32</button>
+  <button id="flash">2️⃣ Nạp firmware</button>
 
   <div id="log"></div>
 
-<script>
-  const logEl = document.getElementById("log");
-  function log(msg) {
-    logEl.textContent += msg + "\n";
-    logEl.scrollTop = logEl.scrollHeight;
-  }
-
-  let espTool;
-  function getLoader() {
-    return window.EspLoader || window.esptooljs?.EspLoader || window.esptool?.EspLoader;
-  }
-
-  document.getElementById("connect").onclick = async () => {
-    try {
-      espTool = const Loader = getLoader();
-      if (!Loader) throw new Error('Không tìm thấy EspLoader trong bundle');
-      espTool = new Loader({({
-        debugLogging: true,
-        logger: log,
-      });
-      await espTool.connect();
-      await espTool.sync();
-      log("✔️ Đã kết nối ESP32!");
-    } catch (e) {
-      log("❌ Lỗi kết nối: " + e);
-    }
-  };
-
-  document.getElementById("flash").onclick = async () => {
-    const fileInput = document.getElementById("firmware");
-    if (!fileInput.files[0]) {
-      alert("Hãy chọn file .bin trước");
-      return;
+  <script>
+    const logEl = document.getElementById("log");
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent += `[${time}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
     }
 
-    const file = fileInput.files[0];
-    const arrayBuffer = await file.arrayBuffer();
-    const firmwareData = new Uint8Array(arrayBuffer);
-
-    try {
-      log("🔄 Bắt đầu nạp firmware...");
-      await espTool.flash([[0x0, firmwareData]]);
-      log("🎉 Nạp xong!");
-    } catch (e) {
-      log("❌ Lỗi nạp firmware: " + e);
+    // Kiểm tra esptool-js đã load chưa
+    function getEsptool() {
+      if (window.esptooljs) return window.esptooljs;
+      log("❌ Không tìm thấy window.esptooljs – bundle chưa load đúng?");
+      return null;
     }
-  };
-</script>
+
+    let transport = null;
+    let loader = null;
+    let serialPort = null;
+
+    // Terminal để esptool-js ghi log ra UI
+    const terminal = {
+      clean() {},
+      writeLine(data) { log(data); },
+      write(data) { log(data); }
+    };
+
+    const connectBtn = document.getElementById("connect");
+    const flashBtn = document.getElementById("flash");
+
+    connectBtn.onclick = async () => {
+      try {
+        const esptool = getEsptool();
+        if (!esptool) return;
+
+        if (!("serial" in navigator)) {
+          log("❌ Trình duyệt không hỗ trợ Web Serial (dùng Chrome / Edge).");
+          return;
+        }
+
+        log("🔌 Chọn cổng serial của ESP32-S3...");
+        serialPort = await navigator.serial.requestPort({});
+        // Transport sẽ tự quản lý open/close
+        transport = new esptool.Transport(serialPort);
+
+        loader = new esptool.ESPLoader({
+          transport,
+          baudrate: 115200,
+          romBaudrate: 115200,
+          terminal,
+          debugLogging: true,
+          enableTracing: false,
+        });
+
+        log("🔄 Đang cố gắng kết nối & sync bootloader...");
+        await loader.main();    // giống esp-web-tools dùng để init chip :contentReference[oaicite:3]{index=3}
+        await loader.flashId();
+
+        log(`✅ Đã kết nối: ${loader.chip.CHIP_NAME}`);
+      } catch (e) {
+        console.error(e);
+        log("❌ Lỗi kết nối: " + (e?.message || e));
+      }
+    };
+
+    flashBtn.onclick = async () => {
+      try {
+        if (!loader || !transport) {
+          log("⚠ Chưa kết nối ESP32. Nhấn 'Kết nối ESP32' trước.");
+          return;
+        }
+
+        const fileInput = document.getElementById("firmware");
+        const file = fileInput.files[0];
+        if (!file) {
+          log("⚠ Hãy chọn file .bin trước.");
+          return;
+        }
+
+        log(`📁 Firmware: ${file.name}`);
+        // esptool-js mong data là binary string, không phải Uint8Array :contentReference[oaicite:4]{index=4}
+        const reader = new FileReader();
+        reader.readAsBinaryString(file);
+
+        reader.onload = async () => {
+          const data = reader.result; // string
+          const totalSize = data.length;
+
+          log("🧮 Chuẩn bị nạp firmware...");
+
+          let lastPct = 0;
+          await loader.writeFlash({
+            fileArray: [
+              {
+                // offset 0x0: dùng khi anh build ra 1 file merge (bootloader + partition + app)
+                // nếu chỉ là app.bin thì offset thường là 0x10000
+                data,
+                address: 0x0,
+              },
+            ],
+            flashSize: "keep",
+            flashMode: "keep",
+            flashFreq: "keep",
+            eraseAll: false,
+            compress: true,
+            reportProgress: (fileIndex, written, total) => {
+              const pct = Math.floor((written / total) * 100);
+              if (pct !== lastPct) {
+                lastPct = pct;
+                log(`✏️ Đang nạp: ${pct}%`);
+              }
+            },
+          });
+
+          log("✅ Nạp xong firmware!");
+          log("🔁 Đang reset thiết bị...");
+          try {
+            await serialPort.setSignals({
+              dataTerminalReady: false,
+              requestToSend: true,
+            });
+            await new Promise((r) => setTimeout(r, 250));
+            await serialPort.setSignals({
+              dataTerminalReady: false,
+              requestToSend: false,
+            });
+          } catch (_) {}
+
+          await transport.disconnect();
+          log("🔌 Đã ngắt kết nối.");
+        };
+
+        reader.onerror = (e) => {
+          log("❌ Lỗi đọc file: " + e);
+        };
+      } catch (e) {
+        console.error(e);
+        log("❌ Lỗi nạp firmware: " + (e?.message || e));
+      }
+    };
+  </script>
 </body>
 </html>
