@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nạp Firmware ESP32</title>
+  <script src="https://unpkg.com/esptool-js@0.6.0/bundle.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    #log {
+      white-space: pre-wrap;
+      background: #fff;
+      padding: 10px;
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      height: 200px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h2>Nạp Firmware ESP32 qua Web Serial</h2>
+
+  <input type="file" id="firmware" accept=".bin" />
+  <br/><br/>
+  <button id="connect">Kết nối thiết bị</button>
+  <button id="flash">Nạp firmware</button>
+
+  <div id="log"></div>
+
+<script>
+  const logEl = document.getElementById("log");
+  function log(msg) {
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  let espTool;
+
+  document.getElementById("connect").onclick = async () => {
+    try {
+      espTool = new esptooljs.EspLoader({
+        debugLogging: true,
+        logger: log,
+      });
+      await espTool.connect();
+      await espTool.sync();
+      log("✔️ Đã kết nối ESP32!");
+    } catch (e) {
+      log("❌ Lỗi kết nối: " + e);
+    }
+  };
+
+  document.getElementById("flash").onclick = async () => {
+    const fileInput = document.getElementById("firmware");
+    if (!fileInput.files[0]) {
+      alert("Hãy chọn file .bin trước");
+      return;
+    }
+
+    const file = fileInput.files[0];
+    const arrayBuffer = await file.arrayBuffer();
+    const firmwareData = new Uint8Array(arrayBuffer);
+
+    try {
+      log("🔄 Bắt đầu nạp firmware...");
+      await espTool.flash([[0x0, firmwareData]]);
+      log("🎉 Nạp xong!");
+    } catch (e) {
+      log("❌ Lỗi nạp firmware: " + e);
+    }
+  };
+</script>
+</body>
+</html>
