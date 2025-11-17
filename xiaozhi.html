@@ -48,10 +48,15 @@
   }
 
   let espTool;
+  function getLoader() {
+    return window.EspLoader || window.esptooljs?.EspLoader || window.esptool?.EspLoader;
+  }
 
   document.getElementById("connect").onclick = async () => {
     try {
-      espTool = new EspLoader({
+      espTool = const Loader = getLoader();
+      if (!Loader) throw new Error('Không tìm thấy EspLoader trong bundle');
+      espTool = new Loader({({
         debugLogging: true,
         logger: log,
       });
