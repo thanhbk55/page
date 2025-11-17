@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nạp Firmware ESP32</title>
-  <script src="https://unpkg.com/esptool-js@0.6.0/bundle.js"></script>
+  <script src="https://unpkg.com/esptool-js/dist/bundle.js"></script>
   <style>
     body {
       font-family: sans-serif;
@@ -51,7 +51,7 @@
 
   document.getElementById("connect").onclick = async () => {
     try {
-      espTool = new esptooljs.EspLoader({
+      espTool = new EspLoader({
         debugLogging: true,
         logger: log,
       });
