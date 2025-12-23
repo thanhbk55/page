@@ -1,4 +1,4 @@
-name: Make Video And Uload
+name: TTS -> Text Video -> Upload to Telegram
 
 on:
   repository_dispatch:
@@ -87,51 +87,62 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Font path (Noto Sans)
-          # Ubuntu thường có: /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
-            # fallback: pick any noto sans
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-
           echo "Using font: $FONT"
-
-          # Dùng textfile để tránh đau đầu escape ký tự (tiếng Việt, dấu, xuống dòng)
-          # Video style:
-          # - nền gradient (dùng geq) + noise nhẹ
-          # - box mờ sau chữ để đọc rõ
-          # - fade in/out nhẹ
-          # - ghép audio, -shortest theo audio
+          
+          # Lấy độ dài audio (giây)
+          DUR=$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+          # Làm tròn xuống và đặt fade-out 0.6s trước khi kết thúc
+          DUR_S=$(python3 - << 'PY'
+          import math, os
+          dur=float(os.environ["DUR"])
+          print(max(1.0, dur))
+          PY
+          )
+          FADE_OUT_START=$(python3 - << 'PY'
+          import os
+          dur=float(os.environ["DUR_S"])
+          print(max(0.0, dur-0.6))
+          PY
+          )
+          
+          echo "Audio duration: $DUR_S sec, fade-out starts at: $FADE_OUT_START"
+          
           ffmpeg -y \
-            -f lavfi -i "color=s=1080x1920:r=30:d=600:c=black" \
+            -f lavfi -i "color=s=1080x1920:r=30:d=${DUR_S}:c=black" \
             -i work/tts.mp3 \
             -filter_complex "\
               [0:v] \
-              format=rgba, \
-              geq=r='128+60*sin(2*PI*Y/1920)':g='90+60*sin(2*PI*X/1080)':b='150+50*sin(2*PI*(X+Y)/1600)':a=255, \
-              noise=alls=8:allf=t+u, \
-              gblur=sigma=10, \
-              eq=contrast=1.05:brightness=0.02:saturation=1.05, \
-              drawtext=fontfile='${FONT}': \
-                textfile=work/text.txt: \
-                reload=0: \
-                x=(w-text_w)/2: \
-                y=(h-text_h)/2: \
-                fontsize=56: \
-                fontcolor=white: \
-                line_spacing=14: \
-                box=1:boxcolor=black@0.45:boxborderw=38: \
-                shadowcolor=black@0.35:shadowx=2:shadowy=2, \
-              fade=t=in:st=0:d=0.4, \
-              fade=t=out:st=0:d=0.4 \
+                format=rgba, \
+                # Gradient ổn định (không đổi theo thời gian)
+                geq=r='110+40*sin(2*PI*Y/1920)':g='90+35*sin(2*PI*X/1080)':b='140+35*sin(2*PI*(X+Y)/1600)':a=255, \
+                # Noise TĨNH để tránh flicker (allf=u)
+                noise=alls=4:allf=u, \
+                gblur=sigma=6, \
+                eq=contrast=1.06:brightness=0.02:saturation=1.06, \
+                drawtext=fontfile='${FONT}': \
+                  textfile=work/text.txt: \
+                  reload=0: \
+                  x=(w-text_w)/2: \
+                  y=(h-text_h)/2: \
+                  fontsize=56: \
+                  fontcolor=white: \
+                  line_spacing=14: \
+                  box=1:boxcolor=black@0.45:boxborderw=38: \
+                  shadowcolor=black@0.30:shadowx=2:shadowy=2, \
+                fade=t=in:st=0:d=0.35, \
+                fade=t=out:st=${FADE_OUT_START}:d=0.6 \
               [v]" \
             -map "[v]" -map "1:a" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k \
             -shortest \
             work/output.mp4
-
+          
           ls -lah work/output.mp4
 
       - name: Upload video to Telegram
