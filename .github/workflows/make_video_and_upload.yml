@@ -1,10 +1,11 @@
-name: TTS -> Text Video -> Upload to Telegram
+name: TTS -> Text Video (premium) -> Upload to Telegram
 
 on:
+  # Trigger từ hệ thống bên ngoài
   repository_dispatch:
     types: [tts_video_to_telegram]
 
-  # để test thủ công
+  # Trigger để test thủ công
   workflow_dispatch:
     inputs:
       text:
@@ -30,7 +31,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
       - name: Resolve inputs (dispatch or manual)
         id: vars
@@ -51,7 +52,6 @@ jobs:
           if [ -z "${CAPTION:-}" ]; then CAPTION=""; fi
           if [ -z "${METHOD:-}" ]; then METHOD="sendVideo"; fi
 
-          # Output
           {
             echo "text<<EOF"
             echo "$TEXT"
@@ -66,12 +66,12 @@ jobs:
           set -euo pipefail
           mkdir -p work
 
-          # Lưu text ra file để dễ debug (và dùng cho video)
+          # lưu text gốc
           cat > work/text.txt << 'EOF'
           ${{ steps.vars.outputs.text }}
           EOF
 
-          # Gọi TTS API (stream) -> tts.mp3
+          # gọi TTS API -> mp3
           curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
@@ -81,68 +81,110 @@ jobs:
               '{text:$text, voice:$voice, format:$format}')" \
             --output work/tts.mp3
 
+          if [ ! -s work/tts.mp3 ]; then
+            echo "tts.mp3 is empty. TTS request failed."
+            exit 1
+          fi
+
           ls -lah work/tts.mp3
 
-      - name: Create beautiful text video (1080x1920) + merge audio
+      - name: Make premium video (no flicker) + merge audio
         run: |
           set -euo pipefail
 
+          # 1) Wrap text cho đẹp (tự xuống dòng theo từ)
+          python3 - << 'PY'
+          import re
+          src = open("work/text.txt","r",encoding="utf-8").read().strip()
+          src = re.sub(r"\s+", " ", src)
+
+          words = src.split(" ")
+          lines, cur = [], []
+          max_chars = 26   # chỉnh 24-30 tùy gu
+          for w in words:
+            if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
+              cur.append(w)
+            else:
+              lines.append(" ".join(cur))
+              cur = [w]
+          if cur: lines.append(" ".join(cur))
+
+          max_lines = 7
+          if len(lines) > max_lines:
+            lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
+
+          open("work/text_wrapped.txt","w",encoding="utf-8").write("\n".join(lines))
+          print("Wrapped lines:", len(lines))
+          PY
+
+          # 2) Duration audio + fade out chuẩn (FIX lỗi DUR)
+          DUR=$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+
+          DUR_S=$(python3 - <<PY
+          dur=float("$DUR")
+          print(max(1.0, dur))
+          PY
+          )
+
+          FADE_OUT_START=$(python3 - <<PY
+          dur=float("$DUR_S")
+          print(max(0.0, dur-0.7))
+          PY
+          )
+
+          echo "Audio duration: $DUR_S sec, fade-out starts: $FADE_OUT_START"
+
+          # 3) Font
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
           echo "Using font: $FONT"
-          
-          # Lấy độ dài audio (giây)
-          DUR=$(ffprobe -v error -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
-          # Làm tròn xuống và đặt fade-out 0.6s trước khi kết thúc
-          DUR_S=$(python3 - << 'PY'
-          import math, os
-          dur=float(os.environ["DUR"])
-          print(max(1.0, dur))
-          PY
-          )
-          FADE_OUT_START=$(python3 - << 'PY'
-          import os
-          dur=float(os.environ["DUR_S"])
-          print(max(0.0, dur-0.6))
-          PY
-          )
-          
-          echo "Audio duration: $DUR_S sec, fade-out starts at: $FADE_OUT_START"
-          
+
+          # 4) Render video premium (1080x1920)
+          # - base canvas 1296x2304 rồi zoompan crop về 1080x1920 (mượt, sang)
+          # - glow layer screen blend
+          # - vignette + grain tĩnh (không nháy)
+          # - text box mờ, shadow nhẹ
           ffmpeg -y \
-            -f lavfi -i "color=s=1080x1920:r=30:d=${DUR_S}:c=black" \
+            -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=black" \
             -i work/tts.mp3 \
             -filter_complex "\
-              [0:v] \
-                format=rgba, \
-                # Gradient ổn định (không đổi theo thời gian)
-                geq=r='110+40*sin(2*PI*Y/1920)':g='90+35*sin(2*PI*X/1080)':b='140+35*sin(2*PI*(X+Y)/1600)':a=255, \
-                # Noise TĨNH để tránh flicker (allf=u)
-                noise=alls=4:allf=u, \
-                gblur=sigma=6, \
-                eq=contrast=1.06:brightness=0.02:saturation=1.06, \
+              [0:v]format=rgba, \
+                geq=r='105+35*sin(2*PI*Y/2304)':g='85+30*sin(2*PI*X/1296)':b='140+30*sin(2*PI*(X+Y)/1900)':a=255, \
+                gblur=sigma=18, \
+                eq=contrast=1.08:brightness=0.02:saturation=1.10 \
+              [bg]; \
+              \
+              color=s=1296x2304:r=30:d=${DUR_S}:c=black,format=rgba, \
+                geq=r='40+20*sin(2*PI*(X+Y)/1200)':g='30+15*sin(2*PI*Y/800)':b='60+18*sin(2*PI*X/900)':a='80', \
+                gblur=sigma=45 \
+              [glow]; \
+              \
+              [bg][glow]blend=all_mode=screen:all_opacity=0.35, \
+                noise=alls=2:allf=u, \
+                vignette=PI/5, \
+                zoompan=z='1+0.00035*on':x='(iw-1080)/2':y='(ih-1920)/2':d=1:s=1080x1920:fps=30, \
                 drawtext=fontfile='${FONT}': \
-                  textfile=work/text.txt: \
+                  textfile=work/text_wrapped.txt: \
                   reload=0: \
                   x=(w-text_w)/2: \
                   y=(h-text_h)/2: \
-                  fontsize=56: \
+                  fontsize=64: \
                   fontcolor=white: \
-                  line_spacing=14: \
-                  box=1:boxcolor=black@0.45:boxborderw=38: \
-                  shadowcolor=black@0.30:shadowx=2:shadowy=2, \
-                fade=t=in:st=0:d=0.35, \
-                fade=t=out:st=${FADE_OUT_START}:d=0.6 \
+                  line_spacing=18: \
+                  box=1:boxcolor=black@0.40:boxborderw=44: \
+                  shadowcolor=black@0.25:shadowx=2:shadowy=2, \
+                fade=t=in:st=0:d=0.40, \
+                fade=t=out:st=${FADE_OUT_START}:d=0.70 \
               [v]" \
             -map "[v]" -map "1:a" \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
             -c:a aac -b:a 192k \
             -shortest \
             work/output.mp4
-          
+
           ls -lah work/output.mp4
 
       - name: Upload video to Telegram
@@ -153,9 +195,8 @@ jobs:
           CAPTION: ${{ steps.vars.outputs.caption }}
         run: |
           set -euo pipefail
-          API="https://api.telegram.org/bot${TG_BOT_TOKEN}/${METHOD}"
 
-          # METHOD: sendVideo or sendDocument
+          API="https://api.telegram.org/bot${TG_BOT_TOKEN}/${METHOD}"
           if [ "$METHOD" = "sendDocument" ]; then
             FIELD="document"
           else
