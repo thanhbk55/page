@@ -69,15 +69,15 @@ jobs:
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
 
           cat > work/upload.txt <<EOF
-Title: $TITLE
-Date: $DATE
-
-Summary:
-$SUMMARY_ONELINE
-
-Full text:
-$(cat work/full.txt)
-EOF
+            Title: $TITLE
+            Date: $DATE
+            
+            Summary:
+            $SUMMARY_ONELINE
+            
+            Full text:
+            $(cat work/full.txt)
+          EOF
 
       - name: Generate TTS from full text (mp3)
         run: |
