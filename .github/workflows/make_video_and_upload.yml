@@ -4,6 +4,17 @@ on:
   repository_dispatch:
     types: [tts_dual_text_to_telegram]
   workflow_dispatch:
+    inputs:
+      summary:
+        description: "Summary text (shown on video)"
+        required: true
+      full:
+        description: "Full text (used for TTS audio)"
+        required: true
+      voice:
+        description: "TTS voice"
+        required: false
+        default: "vi-VN-HoaiMyNeural"
 
 jobs:
   run:
@@ -14,35 +25,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
-      - name: Extract inputs from event JSON (safe)
-        id: inp
+      - name: Write inputs to files (safe)
+        env:
+          SUMMARY_DISPATCH: ${{ github.event.client_payload.summary }}
+          FULL_DISPATCH: ${{ github.event.client_payload.full }}
+          VOICE_DISPATCH: ${{ github.event.client_payload.voice }}
+          SUMMARY_INPUT: ${{ inputs.summary }}
+          FULL_INPUT: ${{ inputs.full }}
+          VOICE_INPUT: ${{ inputs.voice }}
         run: |
           set -euo pipefail
           mkdir -p work
-            python3 - <<'PY'
-            import json, os, re
-            event_path = os.environ["GITHUB_EVENT_PATH"]
-            with open(event_path, "r", encoding="utf-8") as f:
-              ev = json.load(f)
-            # workflow_dispatch -> ev.get("inputs")
-            # repository_dispatch -> ev.get("client_payload")
-            inputs = ev.get("inputs") or {}
-            payload = ev.get("client_payload") or {}
-            summary = (payload.get("summary") or inputs.get("summary") or "").strip()
-            full    = (payload.get("full") or inputs.get("full") or "").strip()
-            voice   = (payload.get("voice") or inputs.get("voice") or "vi-VN-HoaiMyNeural").strip()
-            if not summary:
-              raise SystemExit("Missing summary (client_payload.summary or inputs.summary)")
-            if not full:
-              raise SystemExit("Missing full (client_payload.full or inputs.full)")
-            open("work/summary.txt", "w", encoding="utf-8").write(summary + "\n")
-            open("work/full.txt", "w", encoding="utf-8").write(full + "\n")
-            open("work/voice.txt", "w", encoding="utf-8").write(voice + "\n")
-            # one-line summary for title
-            summary_oneline = re.sub(r"\s+", " ", summary).strip()
-            open("work/summary_oneline.txt", "w", encoding="utf-8").write(summary_oneline + "\n")
-            print("OK inputs extracted")
-            PY
+          python3 - <<'PY'
+          import os
+          summary = os.environ.get("SUMMARY_DISPATCH") or os.environ.get("SUMMARY_INPUT") or ""
+          full = os.environ.get("FULL_DISPATCH") or os.environ.get("FULL_INPUT") or ""
+          voice = os.environ.get("VOICE_DISPATCH") or os.environ.get("VOICE_INPUT") or "vi-VN-HoaiMyNeural"
+          if not summary.strip():
+            raise SystemExit("Missing summary")
+          if not full.strip():
+            raise SystemExit("Missing full")
+          open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
+          open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
+          open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
+          print("OK: wrote summary/full/voice")
+          PY
 
       - name: Prepare title + upload.txt
         id: prep
@@ -50,13 +57,20 @@ jobs:
           set -euo pipefail
           export TZ=Asia/Tokyo
           DATE="$(date +%Y-%m-%d)"
-
-          SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
-          # cắt ngắn ~60 ký tự
-          SHORT="$(python3 - <<PY\n            s = \"\"\"$SUMMARY_ONELINE\"\"\"\n            print((s[:60] + \"…\") if len(s) > 60 else s)\nPY\n          )"
+          SUMMARY_ONELINE="$(python3 - <<'PY'
+          import re
+          s=open("work/summary.txt","r",encoding="utf-8").read().strip()
+          s=re.sub(r"\s+"," ",s)
+          print(s)
+          PY
+          )"
+          SHORT="$(python3 - <<PY
+          s = """$SUMMARY_ONELINE"""
+          print((s[:60] + "…") if len(s) > 60 else s)
+          PY
+          )"
           TITLE="${DATE} ${SHORT}"
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
-
           cat > work/upload.txt <<EOF
           Title: $TITLE
           Date: $DATE
@@ -72,12 +86,10 @@ jobs:
         run: |
           set -euo pipefail
           VOICE="$(cat work/voice.txt)"
-
           curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
             --output work/tts.mp3
-
           if [ ! -s work/tts.mp3 ]; then
             echo "tts.mp3 is empty. TTS request failed."
             exit 1
@@ -87,71 +99,64 @@ jobs:
         run: |
           set -euo pipefail
           python3 - << 'PY'
-            import re
-            src = open("work/summary.txt","r",encoding="utf-8").read().strip()
-            src = re.sub(r"\s+"," ",src)
-            def wrap(src, max_chars, max_lines):
-                words = src.split(" ")
-                lines, cur = [], []
-                for w in words:
-                    if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
-                        cur.append(w)
-                    else:
-                        lines.append(" ".join(cur))
-                        cur = [w]
-                if cur: lines.append(" ".join(cur))
-                if len(lines) > max_lines:
-                    lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
-                return "\n".join(lines)
-            open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
-            open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
+          import re
+          src = open("work/summary.txt","r",encoding="utf-8").read().strip()
+          src = re.sub(r"\s+"," ",src)
+          def wrap(src, max_chars=26, max_lines=7):
+            words = src.split(" ")
+            lines, cur = [], []
+            for w in words:
+              if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
+                cur.append(w)
+              else:
+                lines.append(" ".join(cur))
+                cur = [w]
+            if cur: lines.append(" ".join(cur))
+            if len(lines) > max_lines:
+              lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
+            return "\n".join(lines)
+          open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
+          open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
           PY
 
       - name: Pick random colors + effect (many)
         id: theme
         run: |
           set -euo pipefail
-
           BG1_LIST=( "#0B1026" "#120B2E" "#052B2B" "#1B1020" "#0C1B2A" "#19140D" )
           BG2_LIST=( "#3A7BD5" "#7B2FF7" "#00C6A7" "#FF4D6D" "#F7B733" "#2BC0E4" "#F857A6" "#00F5A0" )
           TXT_LIST=( "#FFFFFF" "#EAF2FF" "#FFF7E6" "#E7FFE8" "#F3E8FF" "#FFEAF1" "#F6FFFE" )
-
           BG1="${BG1_LIST[$((RANDOM % ${#BG1_LIST[@]}))]}"
           BG2="${BG2_LIST[$((RANDOM % ${#BG2_LIST[@]}))]}"
           TXT="${TXT_LIST[$((RANDOM % ${#TXT_LIST[@]}))]}"
-
           EFFECTS=(rain snow fireworks confetti bokeh stars bubbles scanlines sparkle)
           EFFECT="${EFFECTS[$((RANDOM % ${#EFFECTS[@]}))]}"
-
           echo "bg1=$BG1" >> "$GITHUB_OUTPUT"
           echo "bg2=$BG2" >> "$GITHUB_OUTPUT"
           echo "txt=$TXT" >> "$GITHUB_OUTPUT"
           echo "effect=$EFFECT" >> "$GITHUB_OUTPUT"
+          echo "Theme: bg1=$BG1 bg2=$BG2 txt=$TXT effect=$EFFECT"
 
       - name: Render TikTok (1080x1920) + audio
         run: |
           set -euo pipefail
-
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-            dur=float("$DUR"); print(max(1.0, dur))
+          dur=float("$DUR"); print(max(1.0, dur))
           PY
           )
           FADE_OUT_START=$(python3 - <<PY
-            dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
           PY
           )
-
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-
           BG1="${{ steps.theme.outputs.bg1 }}"
           BG2="${{ steps.theme.outputs.bg2 }}"
           TXT="${{ steps.theme.outputs.txt }}"
           EFFECT="${{ steps.theme.outputs.effect }}"
-
           if [ "$EFFECT" = "rain" ]; then
             EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='val>245?255:0',scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
           elif [ "$EFFECT" = "snow" ]; then
@@ -171,7 +176,6 @@ jobs:
           else
             EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='val>250?255:0',format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.20"
           fi
-
           ffmpeg -y \
             -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG1}" \
             -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG2}" \
@@ -194,27 +198,23 @@ jobs:
       - name: Render YouTube (1920x1080) + audio
         run: |
           set -euo pipefail
-
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-            dur=float("$DUR"); print(max(1.0, dur))
+          dur=float("$DUR"); print(max(1.0, dur))
           PY
           )
           FADE_OUT_START=$(python3 - <<PY
-            dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
           PY
           )
-
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-
           BG1="${{ steps.theme.outputs.bg1 }}"
           BG2="${{ steps.theme.outputs.bg2 }}"
           TXT="${{ steps.theme.outputs.txt }}"
           EFFECT="${{ steps.theme.outputs.effect }}"
-
           if [ "$EFFECT" = "rain" ]; then
             EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='val>245?255:0',scale=1920:2160:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*700,1080)'"
           elif [ "$EFFECT" = "snow" ]; then
@@ -234,7 +234,6 @@ jobs:
           else
             EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='val>250?255:0',format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.15"
           fi
-
           ffmpeg -y \
             -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG1}" \
             -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG2}" \
@@ -262,17 +261,14 @@ jobs:
         run: |
           set -euo pipefail
           CAPTION="$TITLE"
-
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
             -F video=@work/tiktok.mp4 | jq .
-
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
             -F video=@work/youtube.mp4 | jq .
-
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
