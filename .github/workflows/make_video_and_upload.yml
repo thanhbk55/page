@@ -21,35 +21,35 @@ jobs:
           mkdir -p work
 
           python3 - <<'PY'
-import json, os, re
-event_path = os.environ["GITHUB_EVENT_PATH"]
-with open(event_path, "r", encoding="utf-8") as f:
-  ev = json.load(f)
-
-# workflow_dispatch -> ev.get("inputs")
-# repository_dispatch -> ev.get("client_payload")
-inputs = ev.get("inputs") or {}
-payload = ev.get("client_payload") or {}
-
-summary = (payload.get("summary") or inputs.get("summary") or "").strip()
-full    = (payload.get("full") or inputs.get("full") or "").strip()
-voice   = (payload.get("voice") or inputs.get("voice") or "vi-VN-HoaiMyNeural").strip()
-
-if not summary:
-  raise SystemExit("Missing summary (client_payload.summary or inputs.summary)")
-if not full:
-  raise SystemExit("Missing full (client_payload.full or inputs.full)")
-
-open("work/summary.txt", "w", encoding="utf-8").write(summary + "\n")
-open("work/full.txt", "w", encoding="utf-8").write(full + "\n")
-open("work/voice.txt", "w", encoding="utf-8").write(voice + "\n")
-
-# one-line summary for title
-summary_oneline = re.sub(r"\s+", " ", summary).strip()
-open("work/summary_oneline.txt", "w", encoding="utf-8").write(summary_oneline + "\n")
-
-print("OK inputs extracted")
-PY
+            import json, os, re
+            event_path = os.environ["GITHUB_EVENT_PATH"]
+            with open(event_path, "r", encoding="utf-8") as f:
+              ev = json.load(f)
+            
+            # workflow_dispatch -> ev.get("inputs")
+            # repository_dispatch -> ev.get("client_payload")
+            inputs = ev.get("inputs") or {}
+            payload = ev.get("client_payload") or {}
+            
+            summary = (payload.get("summary") or inputs.get("summary") or "").strip()
+            full    = (payload.get("full") or inputs.get("full") or "").strip()
+            voice   = (payload.get("voice") or inputs.get("voice") or "vi-VN-HoaiMyNeural").strip()
+            
+            if not summary:
+              raise SystemExit("Missing summary (client_payload.summary or inputs.summary)")
+            if not full:
+              raise SystemExit("Missing full (client_payload.full or inputs.full)")
+            
+            open("work/summary.txt", "w", encoding="utf-8").write(summary + "\n")
+            open("work/full.txt", "w", encoding="utf-8").write(full + "\n")
+            open("work/voice.txt", "w", encoding="utf-8").write(voice + "\n")
+            
+            # one-line summary for title
+            summary_oneline = re.sub(r"\s+", " ", summary).strip()
+            open("work/summary_oneline.txt", "w", encoding="utf-8").write(summary_oneline + "\n")
+            
+            print("OK inputs extracted")
+          PY
 
       - name: Prepare title + upload.txt
         id: prep
