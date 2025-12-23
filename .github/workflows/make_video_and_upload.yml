@@ -24,9 +24,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 python3-pip
-          pip3 install --upgrade pip
-          pip3 install moviepy==2.1.1 pillow numpy imageio-ffmpeg
-          python3 -c "import sys; print('Python:', sys.executable); import moviepy.editor as mp; print('MoviePy version:', mp.__version__)"
+          # Ensure pip and python3 use same environment
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install --user moviepy==2.1.1 pillow numpy imageio-ffmpeg
+          # Verify with same python3
+          python3 << 'PYCHECK'
+          import sys
+          print("Python executable:", sys.executable)
+          print("Python path:", sys.path)
+          try:
+              import moviepy.editor as mp
+              import PIL
+              import numpy as np
+              print("✓ All imports successful!")
+              print("MoviePy version:", mp.__version__)
+          except Exception as e:
+              print(f"✗ Import failed: {e}")
+              import site
+              print("User site-packages:", site.USER_SITE)
+              exit(1)
+          PYCHECK
 
       - name: Write inputs to files (safe)
         env:
