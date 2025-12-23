@@ -1,4 +1,4 @@
-name: TTS(full) + Video(summary) TikTok/YouTube -> Telegram (multi-effects)
+name: "TTS(full) + Video(summary) TikTok/YouTube -> Telegram (multi-effects)"
 
 on:
   repository_dispatch:
@@ -19,37 +19,30 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work
-
-          python3 - <<'PY'
+            python3 - <<'PY'
             import json, os, re
             event_path = os.environ["GITHUB_EVENT_PATH"]
             with open(event_path, "r", encoding="utf-8") as f:
               ev = json.load(f)
-            
             # workflow_dispatch -> ev.get("inputs")
             # repository_dispatch -> ev.get("client_payload")
             inputs = ev.get("inputs") or {}
             payload = ev.get("client_payload") or {}
-            
             summary = (payload.get("summary") or inputs.get("summary") or "").strip()
             full    = (payload.get("full") or inputs.get("full") or "").strip()
             voice   = (payload.get("voice") or inputs.get("voice") or "vi-VN-HoaiMyNeural").strip()
-            
             if not summary:
               raise SystemExit("Missing summary (client_payload.summary or inputs.summary)")
             if not full:
               raise SystemExit("Missing full (client_payload.full or inputs.full)")
-            
             open("work/summary.txt", "w", encoding="utf-8").write(summary + "\n")
             open("work/full.txt", "w", encoding="utf-8").write(full + "\n")
             open("work/voice.txt", "w", encoding="utf-8").write(voice + "\n")
-            
             # one-line summary for title
             summary_oneline = re.sub(r"\s+", " ", summary).strip()
             open("work/summary_oneline.txt", "w", encoding="utf-8").write(summary_oneline + "\n")
-            
             print("OK inputs extracted")
-          PY
+            PY
 
       - name: Prepare title + upload.txt
         id: prep
@@ -60,23 +53,19 @@ jobs:
 
           SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
           # cắt ngắn ~60 ký tự
-          SHORT="$(python3 - <<PY
-            s = """$SUMMARY_ONELINE"""
-            print((s[:60] + "…") if len(s) > 60 else s)
-            PY
-          )"
+          SHORT="$(python3 - <<PY\n            s = \"\"\"$SUMMARY_ONELINE\"\"\"\n            print((s[:60] + \"…\") if len(s) > 60 else s)\nPY\n          )"
           TITLE="${DATE} ${SHORT}"
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
 
           cat > work/upload.txt <<EOF
-            Title: $TITLE
-            Date: $DATE
-            
-            Summary:
-            $SUMMARY_ONELINE
-            
-            Full text:
-            $(cat work/full.txt)
+          Title: $TITLE
+          Date: $DATE
+
+          Summary:
+          $SUMMARY_ONELINE
+
+          Full text:
+          $(cat work/full.txt)
           EOF
 
       - name: Generate TTS from full text (mp3)
@@ -86,8 +75,7 @@ jobs:
 
           curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" \
-              '{text:$text, voice:$voice, format:$format}')" \
+            -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
             --output work/tts.mp3
 
           if [ ! -s work/tts.mp3 ]; then
@@ -102,21 +90,19 @@ jobs:
             import re
             src = open("work/summary.txt","r",encoding="utf-8").read().strip()
             src = re.sub(r"\s+"," ",src)
-            
             def wrap(src, max_chars, max_lines):
-              words = src.split(" ")
-              lines, cur = [], []
-              for w in words:
-                if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
-                  cur.append(w)
-                else:
-                  lines.append(" ".join(cur))
-                  cur = [w]
-              if cur: lines.append(" ".join(cur))
-              if len(lines) > max_lines:
-                lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
-              return "\n".join(lines)
-            
+                words = src.split(" ")
+                lines, cur = [], []
+                for w in words:
+                    if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
+                        cur.append(w)
+                    else:
+                        lines.append(" ".join(cur))
+                        cur = [w]
+                if cur: lines.append(" ".join(cur))
+                if len(lines) > max_lines:
+                    lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
+                return "\n".join(lines)
             open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
             open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
           PY
