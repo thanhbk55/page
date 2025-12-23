@@ -158,23 +158,23 @@ jobs:
           TXT="${{ steps.theme.outputs.txt }}"
           EFFECT="${{ steps.theme.outputs.effect }}"
           if [ "$EFFECT" = "rain" ]; then
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='if(gt(val,245),255,0)',scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
           elif [ "$EFFECT" = "snow" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut='if(gt(val,248),255,0)',scale=1080:3840:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.20,crop=1080:1920:x='mod(t*40,140)':y='mod(t*280,1920)'"
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.20,crop=1080:1920:x='mod(t*40,140)':y='mod(t*280,1920)'"
           elif [ "$EFFECT" = "fireworks" ]; then
             EFFECT_GRAPH="cellauto=s=540x960:rule=110:r=30,scale=1080:1920,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.22"
           elif [ "$EFFECT" = "confetti" ]; then
             EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.18,scale=1080:3840,crop=1080:1920:x='mod(t*90,120)':y='mod(t*650,1920)'"
           elif [ "$EFFECT" = "bokeh" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut='if(gt(val,235),255,0)',scale=1080:3840,gblur=sigma=8,format=rgba,colorchannelmixer=aa=0.18,crop=1080:1920:x=0:y='mod(t*120,1920)'"
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1080:3840,gblur=sigma=8,format=rgba,colorchannelmixer=aa=0.18,crop=1080:1920:x=0:y='mod(t*120,1920)'"
           elif [ "$EFFECT" = "stars" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut='if(gt(val,252),255,0)',scale=1080:3840,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*600,1920)'"
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1080:3840,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*600,1920)'"
           elif [ "$EFFECT" = "bubbles" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut='if(gt(val,248),255,0)',gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.16,scale=1080:3840,crop=1080:1920:x='mod(t*30,120)':y='1920-mod(t*420,1920)'"
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.16,scale=1080:3840,crop=1080:1920:x='mod(t*30,120)':y='1920-mod(t*420,1920)'"
           elif [ "$EFFECT" = "scanlines" ]; then
-            EFFECT_GRAPH="geq=r='0':g='0':b='0':a='if(mod(Y+t*60,6)<1,90,0)',format=rgba,scale=1080:1920,colorchannelmixer=aa=0.25"
+            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,90)',format=rgba,scale=1080:1920,colorchannelmixer=aa=0.25"
           else
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='if(gt(val,250),255,0)',format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.20"
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.20"
           fi
           ffmpeg -y \
             -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG1}" \
@@ -216,23 +216,23 @@ jobs:
           TXT="${{ steps.theme.outputs.txt }}"
           EFFECT="${{ steps.theme.outputs.effect }}"
           if [ "$EFFECT" = "rain" ]; then
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='if(gt(val,245),255,0)',scale=1920:2160:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*700,1080)'"
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*700,1080)'"
           elif [ "$EFFECT" = "snow" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut='if(gt(val,248),255,0)',scale=1920:2160:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.16,crop=1920:1080:x='mod(t*35,160)':y='mod(t*220,1080)'"
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.16,crop=1920:1080:x='mod(t*35,160)':y='mod(t*220,1080)'"
           elif [ "$EFFECT" = "fireworks" ]; then
             EFFECT_GRAPH="cellauto=s=960x540:rule=110:r=30,scale=1920:1080,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.18"
           elif [ "$EFFECT" = "confetti" ]; then
             EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.14,scale=1920:2160,crop=1920:1080:x='mod(t*120,200)':y='mod(t*420,1080)'"
           elif [ "$EFFECT" = "bokeh" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut='if(gt(val,235),255,0)',scale=1920:2160,gblur=sigma=10,format=rgba,colorchannelmixer=aa=0.14,crop=1920:1080:x=0:y='mod(t*100,1080)'"
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1920:2160,gblur=sigma=10,format=rgba,colorchannelmixer=aa=0.14,crop=1920:1080:x=0:y='mod(t*100,1080)'"
           elif [ "$EFFECT" = "stars" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut='if(gt(val,252),255,0)',scale=1920:2160,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*480,1080)'"
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1920:2160,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*480,1080)'"
           elif [ "$EFFECT" = "bubbles" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut='if(gt(val,248),255,0)',gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.12,scale=1920:2160,crop=1920:1080:x='mod(t*30,180)':y='1080-mod(t*260,1080)'"
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.12,scale=1920:2160,crop=1920:1080:x='mod(t*30,180)':y='1080-mod(t*260,1080)'"
           elif [ "$EFFECT" = "scanlines" ]; then
-            EFFECT_GRAPH="geq=r='0':g='0':b='0':a='if(mod(Y+t*60,6)<1,80,0)',format=rgba,scale=1920:1080,colorchannelmixer=aa=0.20"
+            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,80)',format=rgba,scale=1920:1080,colorchannelmixer=aa=0.20"
           else
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='if(gt(val,250),255,0)',format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.15"
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.15"
           fi
           ffmpeg -y \
             -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG1}" \
