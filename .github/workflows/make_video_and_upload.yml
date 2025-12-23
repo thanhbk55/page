@@ -1,71 +1,140 @@
 name: Make Video And Uload
 
 on:
-  # Trigger từ hệ thống bên ngoài (webhook/server/cron/another action)
   repository_dispatch:
-    types: [upload_to_telegram]
+    types: [tts_video_to_telegram]
 
-  # Giữ lại để test thủ công
+  # để test thủ công
   workflow_dispatch:
     inputs:
-      file_url:
-        description: "Direct URL of the file to upload"
+      text:
+        description: "Text input"
         required: true
-      method:
-        description: "sendDocument | sendVideo | sendAudio | sendPhoto"
+      voice:
+        description: "TTS voice (e.g. vi-VN-HoaiMyNeural)"
         required: false
-        default: "sendDocument"
+        default: "vi-VN-HoaiMyNeural"
       caption:
-        description: "Optional caption"
+        description: "Telegram caption (optional)"
         required: false
         default: ""
+      method:
+        description: "Telegram method: sendVideo | sendDocument"
+        required: false
+        default: "sendVideo"
 
 jobs:
-  upload:
+  build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare tools
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq curl
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core
 
-      - name: Resolve inputs (from dispatch or manual)
+      - name: Resolve inputs (dispatch or manual)
         id: vars
         run: |
           set -euo pipefail
 
-          # If repository_dispatch: read from github.event.client_payload.*
-          # If workflow_dispatch: read from inputs.*
-          FILE_URL="${{ github.event.client_payload.file_url }}"
-          METHOD="${{ github.event.client_payload.method }}"
+          TEXT="${{ github.event.client_payload.text }}"
+          VOICE="${{ github.event.client_payload.voice }}"
           CAPTION="${{ github.event.client_payload.caption }}"
+          METHOD="${{ github.event.client_payload.method }}"
 
-          if [ -z "${FILE_URL:-}" ]; then
-            FILE_URL="${{ inputs.file_url }}"
-          fi
-          if [ -z "${METHOD:-}" ]; then
-            METHOD="${{ inputs.method }}"
-          fi
-          if [ -z "${CAPTION:-}" ]; then
-            CAPTION="${{ inputs.caption }}"
-          fi
+          if [ -z "${TEXT:-}" ]; then TEXT="${{ inputs.text }}"; fi
+          if [ -z "${VOICE:-}" ]; then VOICE="${{ inputs.voice }}"; fi
+          if [ -z "${CAPTION:-}" ]; then CAPTION="${{ inputs.caption }}"; fi
+          if [ -z "${METHOD:-}" ]; then METHOD="${{ inputs.method }}"; fi
 
-          # Defaults
-          if [ -z "${METHOD:-}" ]; then METHOD="sendDocument"; fi
+          if [ -z "${VOICE:-}" ]; then VOICE="vi-VN-HoaiMyNeural"; fi
           if [ -z "${CAPTION:-}" ]; then CAPTION=""; fi
+          if [ -z "${METHOD:-}" ]; then METHOD="sendVideo"; fi
 
-          echo "file_url=$FILE_URL" >> "$GITHUB_OUTPUT"
-          echo "method=$METHOD" >> "$GITHUB_OUTPUT"
-          echo "caption=$CAPTION" >> "$GITHUB_OUTPUT"
+          # Output
+          {
+            echo "text<<EOF"
+            echo "$TEXT"
+            echo "EOF"
+            echo "voice=$VOICE"
+            echo "caption=$CAPTION"
+            echo "method=$METHOD"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Download file from URL
+      - name: Generate TTS (mp3)
         run: |
           set -euo pipefail
           mkdir -p work
-          curl -L "${{ steps.vars.outputs.file_url }}" -o work/input.bin
-          ls -lah work/input.bin
 
-      - name: Upload to Telegram
+          # Lưu text ra file để dễ debug (và dùng cho video)
+          cat > work/text.txt << 'EOF'
+          ${{ steps.vars.outputs.text }}
+          EOF
+
+          # Gọi TTS API (stream) -> tts.mp3
+          curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg text "${{ steps.vars.outputs.text }}" \
+              --arg voice "${{ steps.vars.outputs.voice }}" \
+              --arg format "mp3" \
+              '{text:$text, voice:$voice, format:$format}')" \
+            --output work/tts.mp3
+
+          ls -lah work/tts.mp3
+
+      - name: Create beautiful text video (1080x1920) + merge audio
+        run: |
+          set -euo pipefail
+
+          # Font path (Noto Sans)
+          # Ubuntu thường có: /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+          if [ ! -f "$FONT" ]; then
+            # fallback: pick any noto sans
+            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
+          fi
+
+          echo "Using font: $FONT"
+
+          # Dùng textfile để tránh đau đầu escape ký tự (tiếng Việt, dấu, xuống dòng)
+          # Video style:
+          # - nền gradient (dùng geq) + noise nhẹ
+          # - box mờ sau chữ để đọc rõ
+          # - fade in/out nhẹ
+          # - ghép audio, -shortest theo audio
+          ffmpeg -y \
+            -f lavfi -i "color=s=1080x1920:r=30:d=600:c=black" \
+            -i work/tts.mp3 \
+            -filter_complex "\
+              [0:v] \
+              format=rgba, \
+              geq=r='128+60*sin(2*PI*Y/1920)':g='90+60*sin(2*PI*X/1080)':b='150+50*sin(2*PI*(X+Y)/1600)':a=255, \
+              noise=alls=8:allf=t+u, \
+              gblur=sigma=10, \
+              eq=contrast=1.05:brightness=0.02:saturation=1.05, \
+              drawtext=fontfile='${FONT}': \
+                textfile=work/text.txt: \
+                reload=0: \
+                x=(w-text_w)/2: \
+                y=(h-text_h)/2: \
+                fontsize=56: \
+                fontcolor=white: \
+                line_spacing=14: \
+                box=1:boxcolor=black@0.45:boxborderw=38: \
+                shadowcolor=black@0.35:shadowx=2:shadowy=2, \
+              fade=t=in:st=0:d=0.4, \
+              fade=t=out:st=0:d=0.4 \
+              [v]" \
+            -map "[v]" -map "1:a" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:a aac -b:a 192k \
+            -shortest \
+            work/output.mp4
+
+          ls -lah work/output.mp4
+
+      - name: Upload video to Telegram
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -73,27 +142,26 @@ jobs:
           CAPTION: ${{ steps.vars.outputs.caption }}
         run: |
           set -euo pipefail
-
           API="https://api.telegram.org/bot${TG_BOT_TOKEN}/${METHOD}"
 
-          case "$METHOD" in
-            sendPhoto)   FIELD="photo" ;;
-            sendAudio)   FIELD="audio" ;;
-            sendVideo)   FIELD="video" ;;
-            sendDocument|*) FIELD="document" ;;
-          esac
+          # METHOD: sendVideo or sendDocument
+          if [ "$METHOD" = "sendDocument" ]; then
+            FIELD="document"
+          else
+            FIELD="video"
+          fi
 
           RESP=$(curl -sS -X POST "$API" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
-            -F "$FIELD=@work/input.bin")
+            -F "$FIELD=@work/output.mp4")
 
           echo "$RESP" | jq .
 
-          if [ "$METHOD" = "sendPhoto" ]; then
-            FILE_ID=$(echo "$RESP" | jq -r '.result.photo[-1].file_id // empty')
+          if [ "$METHOD" = "sendDocument" ]; then
+            FILE_ID=$(echo "$RESP" | jq -r '.result.document.file_id // empty')
           else
-            FILE_ID=$(echo "$RESP" | jq -r ".result.${FIELD}.file_id // empty")
+            FILE_ID=$(echo "$RESP" | jq -r '.result.video.file_id // empty')
           fi
 
           if [ -z "$FILE_ID" ]; then
@@ -101,10 +169,13 @@ jobs:
             exit 1
           fi
 
-          echo "file_id=$FILE_ID" | tee work/result.txt
+          echo "file_id=$FILE_ID" | tee work/telegram_result.txt
 
-      - name: Upload artifact
+      - name: Upload artifacts (optional)
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-upload-result
-          path: work/result.txt
+          name: tts-video-output
+          path: |
+            work/tts.mp3
+            work/output.mp4
+            work/telegram_result.txt
