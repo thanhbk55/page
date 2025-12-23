@@ -1,9 +1,8 @@
-name: TTS (full) + Video (summary) -> TikTok/YouTube -> Telegram
+name: TTS(full) + Video(summary) TikTok/YouTube -> Telegram
 
 on:
   repository_dispatch:
     types: [tts_dual_text_to_telegram]
-
   workflow_dispatch:
     inputs:
       summary:
@@ -26,50 +25,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
-      - name: Resolve inputs (dispatch or manual)
-        id: vars
-        run: |
-          set -euo pipefail
-
-          SUMMARY="${{ github.event.client_payload.summary }}"
-          FULL="${{ github.event.client_payload.full }}"
-          VOICE="${{ github.event.client_payload.voice }}"
-
-          if [ -z "${SUMMARY:-}" ]; then SUMMARY="${{ inputs.summary }}"; fi
-          if [ -z "${FULL:-}" ]; then FULL="${{ inputs.full }}"; fi
-          if [ -z "${VOICE:-}" ]; then VOICE="${{ inputs.voice }}"; fi
-          if [ -z "${VOICE:-}" ]; then VOICE="vi-VN-HoaiMyNeural"; fi
-
-          {
-            echo "summary<<EOF"
-            echo "$SUMMARY"
-            echo "EOF"
-            echo "full<<EOF"
-            echo "$FULL"
-            echo "EOF"
-            echo "voice=$VOICE"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare text files + title
-        id: prep
+      - name: Write inputs to files (safe)
+        env:
+          SUMMARY_DISPATCH: ${{ github.event.client_payload.summary }}
+          FULL_DISPATCH: ${{ github.event.client_payload.full }}
+          VOICE_DISPATCH: ${{ github.event.client_payload.voice }}
+          SUMMARY_INPUT: ${{ inputs.summary }}
+          FULL_INPUT: ${{ inputs.full }}
+          VOICE_INPUT: ${{ inputs.voice }}
         run: |
           set -euo pipefail
           mkdir -p work
 
-          # Save texts
-          cat > work/summary.txt << 'EOF'
-          ${{ steps.vars.outputs.summary }}
-          EOF
+          python3 - <<'PY'
+import os
 
-          cat > work/full.txt << 'EOF'
-          ${{ steps.vars.outputs.full }}
-          EOF
+summary = os.environ.get("SUMMARY_DISPATCH") or os.environ.get("SUMMARY_INPUT") or ""
+full = os.environ.get("FULL_DISPATCH") or os.environ.get("FULL_INPUT") or ""
+voice = os.environ.get("VOICE_DISPATCH") or os.environ.get("VOICE_INPUT") or "vi-VN-HoaiMyNeural"
 
-          # Date in Asia/Tokyo
+if not summary.strip():
+  raise SystemExit("Missing summary")
+if not full.strip():
+  raise SystemExit("Missing full")
+
+open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
+open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
+open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
+print("OK: wrote summary/full/voice")
+PY
+
+      - name: Prepare title + upload.txt
+        id: prep
+        run: |
+          set -euo pipefail
           export TZ=Asia/Tokyo
           DATE="$(date +%Y-%m-%d)"
 
-          # Short title: DATE + first ~60 chars of summary (one line)
           SUMMARY_ONELINE="$(python3 - <<'PY'
 import re
 s=open("work/summary.txt","r",encoding="utf-8").read().strip()
@@ -83,35 +75,27 @@ print((s[:60] + "…") if len(s) > 60 else s)
 PY
 )"
           TITLE="${DATE} ${SHORT}"
-
-          echo "date=$DATE" >> "$GITHUB_OUTPUT"
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
 
-          # Create upload.txt (tổng hợp)
           cat > work/upload.txt <<EOF
-          Title: $TITLE
-          Date: $DATE
+Title: $TITLE
+Date: $DATE
 
-          Summary:
-          $SUMMARY_ONELINE
+Summary:
+$SUMMARY_ONELINE
 
-          Full text:
-          $(cat work/full.txt)
-          EOF
-
-          echo "Prepared title: $TITLE"
-          ls -lah work/upload.txt
+Full text:
+$(cat work/full.txt)
+EOF
 
       - name: Generate TTS from full text (mp3)
         run: |
           set -euo pipefail
+          VOICE="$(cat work/voice.txt)"
 
           curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg text "${{ steps.vars.outputs.full }}" \
-              --arg voice "${{ steps.vars.outputs.voice }}" \
-              --arg format "mp3" \
+            -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" \
               '{text:$text, voice:$voice, format:$format}')" \
             --output work/tts.mp3
 
@@ -119,7 +103,6 @@ PY
             echo "tts.mp3 is empty. TTS request failed."
             exit 1
           fi
-          ls -lah work/tts.mp3
 
       - name: Wrap summary text for video
         run: |
@@ -143,9 +126,8 @@ def wrap(src, max_chars=26, max_lines=7):
     lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
   return "\n".join(lines)
 
-open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, max_chars=26, max_lines=7))
-open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, max_chars=38, max_lines=5))
-print("wrapped ok")
+open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
+open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
 PY
 
       - name: Pick random colors + effect
@@ -153,13 +135,11 @@ PY
         run: |
           set -euo pipefail
 
-          # palettes: bg1/bg2/text
           BG1_LIST=( "#0B1026" "#120B2E" "#052B2B" "#1B1020" "#0C1B2A" "#19140D" )
           BG2_LIST=( "#3A7BD5" "#7B2FF7" "#00C6A7" "#FF4D6D" "#F7B733" "#2BC0E4" )
           TXT_LIST=( "#FFFFFF" "#EAF2FF" "#FFF7E6" "#E7FFE8" "#F3E8FF" "#FFEAF1" )
 
-          idx=$((RANDOM % ${#BG1_LIST[@]}))
-          BG1="${BG1_LIST[$idx]}"
+          BG1="${BG1_LIST[$((RANDOM % ${#BG1_LIST[@]}))]}"
           BG2="${BG2_LIST[$((RANDOM % ${#BG2_LIST[@]}))]}"
           TXT="${TXT_LIST[$((RANDOM % ${#TXT_LIST[@]}))]}"
 
@@ -171,22 +151,17 @@ PY
           echo "txt=$TXT" >> "$GITHUB_OUTPUT"
           echo "effect=$EFFECT" >> "$GITHUB_OUTPUT"
 
-          echo "Theme: bg1=$BG1 bg2=$BG2 txt=$TXT effect=$EFFECT"
-
-      - name: Render TikTok video (1080x1920) + audio
+      - name: Render TikTok (1080x1920) + audio
         run: |
           set -euo pipefail
 
-          # duration
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-dur=float("$DUR")
-print(max(1.0, dur))
+dur=float("$DUR"); print(max(1.0, dur))
 PY
 )
           FADE_OUT_START=$(python3 - <<PY
-dur=float("$DUR_S")
-print(max(0.0, dur-0.7))
+dur=float("$DUR_S"); print(max(0.0, dur-0.7))
 PY
 )
 
@@ -200,10 +175,6 @@ PY
           TXT="${{ steps.theme.outputs.txt }}"
           EFFECT="${{ steps.theme.outputs.effect }}"
 
-          # effect layer
-          # - rain: static noise threshold -> stretched -> vertical moving crop (no flicker)
-          # - snow: similar nhưng blur + drift chậm
-          # - fireworks: cellauto + blur + screen blend (lấp lánh)
           if [ "$EFFECT" = "rain" ]; then
             EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut='val>245?255:0',scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
           elif [ "$EFFECT" = "snow" ]; then
@@ -218,40 +189,30 @@ PY
             -f lavfi -i "color=s=1080x1920:r=30:d=${DUR_S}:c=black" \
             -i work/tts.mp3 \
             -filter_complex "\
-              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55, \
-                gblur=sigma=18, \
-                vignette=PI/5, \
-                zoompan=z='1+0.00035*on':x='(iw-1080)/2':y='(ih-1920)/2':d=1:s=1080x1920:fps=30 \
-              [base]; \
+              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/5, \
+              zoompan=z='1+0.00035*on':x='(iw-1080)/2':y='(ih-1920)/2':d=1:s=1080x1920:fps=30[base]; \
               [2:v]${EFFECT_GRAPH}[fx]; \
               [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
               [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
                 x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=${TXT}:line_spacing=18: \
                 box=1:boxcolor=black@0.38:boxborderw=46:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
-                fade=t=in:st=0:d=0.40, \
-                fade=t=out:st=${FADE_OUT_START}:d=0.70 \
-              [v]" \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
             -map "[v]" -map "3:a" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
             -c:a aac -b:a 192k \
-            -shortest \
-            work/tiktok.mp4
+            -shortest work/tiktok.mp4
 
-          ls -lah work/tiktok.mp4
-
-      - name: Render YouTube video (1920x1080) + audio
+      - name: Render YouTube (1920x1080) + audio
         run: |
           set -euo pipefail
 
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-dur=float("$DUR")
-print(max(1.0, dur))
+dur=float("$DUR"); print(max(1.0, dur))
 PY
 )
           FADE_OUT_START=$(python3 - <<PY
-dur=float("$DUR_S")
-print(max(0.0, dur-0.7))
+dur=float("$DUR_S"); print(max(0.0, dur-0.7))
 PY
 )
 
@@ -279,51 +240,38 @@ PY
             -f lavfi -i "color=s=1920x1080:r=30:d=${DUR_S}:c=black" \
             -i work/tts.mp3 \
             -filter_complex "\
-              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55, \
-                gblur=sigma=18, \
-                vignette=PI/6, \
-                zoompan=z='1+0.00030*on':x='(iw-1920)/2':y='(ih-1080)/2':d=1:s=1920x1080:fps=30 \
-              [base]; \
+              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/6, \
+              zoompan=z='1+0.00030*on':x='(iw-1920)/2':y='(ih-1080)/2':d=1:s=1920x1080:fps=30[base]; \
               [2:v]${EFFECT_GRAPH}[fx]; \
               [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
               [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
                 x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=${TXT}:line_spacing=16: \
                 box=1:boxcolor=black@0.36:boxborderw=40:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
-                fade=t=in:st=0:d=0.40, \
-                fade=t=out:st=${FADE_OUT_START}:d=0.70 \
-              [v]" \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
             -map "[v]" -map "3:a" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
             -c:a aac -b:a 192k \
-            -shortest \
-            work/youtube.mp4
+            -shortest work/youtube.mp4
 
-          ls -lah work/youtube.mp4
-
-      - name: Upload to Telegram (title = date + summary short)
+      - name: Upload to Telegram (caption = date + summary short)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TITLE: ${{ steps.prep.outputs.title }}
         run: |
           set -euo pipefail
-
-          # Caption: TITLE (ngày + summary)
           CAPTION="$TITLE"
 
-          # 1) Send TikTok video
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
             -F video=@work/tiktok.mp4 | jq .
 
-          # 2) Send YouTube video
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
             -F video=@work/youtube.mp4 | jq .
 
-          # 3) Send upload.txt (tổng hợp nội dung)
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
