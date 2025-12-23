@@ -61,10 +61,10 @@ jobs:
           SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
           # cắt ngắn ~60 ký tự
           SHORT="$(python3 - <<PY
-s = """$SUMMARY_ONELINE"""
-print((s[:60] + "…") if len(s) > 60 else s)
-PY
-)"
+            s = """$SUMMARY_ONELINE"""
+            print((s[:60] + "…") if len(s) > 60 else s)
+            PY
+          )"
           TITLE="${DATE} ${SHORT}"
           echo "title=$TITLE" >> "$GITHUB_OUTPUT"
 
@@ -99,27 +99,27 @@ EOF
         run: |
           set -euo pipefail
           python3 - << 'PY'
-import re
-src = open("work/summary.txt","r",encoding="utf-8").read().strip()
-src = re.sub(r"\s+"," ",src)
-
-def wrap(src, max_chars, max_lines):
-  words = src.split(" ")
-  lines, cur = [], []
-  for w in words:
-    if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
-      cur.append(w)
-    else:
-      lines.append(" ".join(cur))
-      cur = [w]
-  if cur: lines.append(" ".join(cur))
-  if len(lines) > max_lines:
-    lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
-  return "\n".join(lines)
-
-open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
-open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
-PY
+            import re
+            src = open("work/summary.txt","r",encoding="utf-8").read().strip()
+            src = re.sub(r"\s+"," ",src)
+            
+            def wrap(src, max_chars, max_lines):
+              words = src.split(" ")
+              lines, cur = [], []
+              for w in words:
+                if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
+                  cur.append(w)
+                else:
+                  lines.append(" ".join(cur))
+                  cur = [w]
+              if cur: lines.append(" ".join(cur))
+              if len(lines) > max_lines:
+                lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
+              return "\n".join(lines)
+            
+            open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
+            open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
+          PY
 
       - name: Pick random colors + effect (many)
         id: theme
@@ -148,13 +148,13 @@ PY
 
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-dur=float("$DUR"); print(max(1.0, dur))
-PY
-)
+            dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
           FADE_OUT_START=$(python3 - <<PY
-dur=float("$DUR_S"); print(max(0.0, dur-0.7))
-PY
-)
+            dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
 
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
@@ -211,13 +211,13 @@ PY
 
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           DUR_S=$(python3 - <<PY
-dur=float("$DUR"); print(max(1.0, dur))
-PY
-)
+            dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
           FADE_OUT_START=$(python3 - <<PY
-dur=float("$DUR_S"); print(max(0.0, dur-0.7))
-PY
-)
+            dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
 
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
