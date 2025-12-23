@@ -1,0 +1,110 @@
+name: Make Video And Uload
+
+on:
+  # Trigger từ hệ thống bên ngoài (webhook/server/cron/another action)
+  repository_dispatch:
+    types: [upload_to_telegram]
+
+  # Giữ lại để test thủ công
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: "Direct URL of the file to upload"
+        required: true
+      method:
+        description: "sendDocument | sendVideo | sendAudio | sendPhoto"
+        required: false
+        default: "sendDocument"
+      caption:
+        description: "Optional caption"
+        required: false
+        default: ""
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Resolve inputs (from dispatch or manual)
+        id: vars
+        run: |
+          set -euo pipefail
+
+          # If repository_dispatch: read from github.event.client_payload.*
+          # If workflow_dispatch: read from inputs.*
+          FILE_URL="${{ github.event.client_payload.file_url }}"
+          METHOD="${{ github.event.client_payload.method }}"
+          CAPTION="${{ github.event.client_payload.caption }}"
+
+          if [ -z "${FILE_URL:-}" ]; then
+            FILE_URL="${{ inputs.file_url }}"
+          fi
+          if [ -z "${METHOD:-}" ]; then
+            METHOD="${{ inputs.method }}"
+          fi
+          if [ -z "${CAPTION:-}" ]; then
+            CAPTION="${{ inputs.caption }}"
+          fi
+
+          # Defaults
+          if [ -z "${METHOD:-}" ]; then METHOD="sendDocument"; fi
+          if [ -z "${CAPTION:-}" ]; then CAPTION=""; fi
+
+          echo "file_url=$FILE_URL" >> "$GITHUB_OUTPUT"
+          echo "method=$METHOD" >> "$GITHUB_OUTPUT"
+          echo "caption=$CAPTION" >> "$GITHUB_OUTPUT"
+
+      - name: Download file from URL
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          curl -L "${{ steps.vars.outputs.file_url }}" -o work/input.bin
+          ls -lah work/input.bin
+
+      - name: Upload to Telegram
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          METHOD: ${{ steps.vars.outputs.method }}
+          CAPTION: ${{ steps.vars.outputs.caption }}
+        run: |
+          set -euo pipefail
+
+          API="https://api.telegram.org/bot${TG_BOT_TOKEN}/${METHOD}"
+
+          case "$METHOD" in
+            sendPhoto)   FIELD="photo" ;;
+            sendAudio)   FIELD="audio" ;;
+            sendVideo)   FIELD="video" ;;
+            sendDocument|*) FIELD="document" ;;
+          esac
+
+          RESP=$(curl -sS -X POST "$API" \
+            -F chat_id="$TG_CHAT_ID" \
+            -F caption="$CAPTION" \
+            -F "$FIELD=@work/input.bin")
+
+          echo "$RESP" | jq .
+
+          if [ "$METHOD" = "sendPhoto" ]; then
+            FILE_ID=$(echo "$RESP" | jq -r '.result.photo[-1].file_id // empty')
+          else
+            FILE_ID=$(echo "$RESP" | jq -r ".result.${FIELD}.file_id // empty")
+          fi
+
+          if [ -z "$FILE_ID" ]; then
+            echo "Could not extract file_id."
+            exit 1
+          fi
+
+          echo "file_id=$FILE_ID" | tee work/result.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-upload-result
+          path: work/result.txt
