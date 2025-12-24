@@ -1,428 +1,230 @@
-#!/usr/bin/env python3
-"""
-Video renderer using MoviePy + PIL for TikTok & YouTube
-Supports multiple animated effects: rain, snow, fireworks, confetti, bokeh, stars, bubbles, scanlines, sparkle
-"""
+name: "TTS + Video TikTok/YouTube -> Telegram"
 
-import sys
-import random
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from moviepy.editor import *
-from moviepy.video.fx.all import fadein, fadeout
-import colorsys
+on:
+  repository_dispatch:
+    types: [tts_dual_text_to_telegram]
+  workflow_dispatch:
+    inputs:
+      summary:
+        description: "Summary text (shown on video)"
+        required: true
+      full:
+        description: "Full text (used for TTS audio)"
+        required: true
+      background_url:
+        description: "Background image URL"
+        required: true
+      voice:
+        description: "TTS voice"
+        required: false
+        default: "vi-VN-HoaiMyNeural"
 
-def hex_to_rgb(hex_color):
-    """Convert hex color to RGB tuple"""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
-def create_gradient_background(width, height, color1, color2):
-    """Create gradient background from color1 to color2"""
-    base = Image.new('RGB', (width, height), color1)
-    top = Image.new('RGB', (width, height), color2)
-    
-    # Create gradient mask
-    mask = Image.new('L', (width, height))
-    for y in range(height):
-        value = int(255 * (y / height))
-        for x in range(width):
-            mask.putpixel((x, y), value)
-    
-    # Blend
-    base.paste(top, (0, 0), mask)
-    return base
+      - name: Write inputs to files (safe)
+        env:
+          SUMMARY_DISPATCH: ${{ github.event.client_payload.summary }}
+          FULL_DISPATCH: ${{ github.event.client_payload.full }}
+          BG_URL_DISPATCH: ${{ github.event.client_payload.background_url }}
+          VOICE_DISPATCH: ${{ github.event.client_payload.voice }}
+          SUMMARY_INPUT: ${{ inputs.summary }}
+          FULL_INPUT: ${{ inputs.full }}
+          BG_URL_INPUT: ${{ inputs.background_url }}
+          VOICE_INPUT: ${{ inputs.voice }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          python3 - <<'PY'
+          import os
+          summary = os.environ.get("SUMMARY_DISPATCH") or os.environ.get("SUMMARY_INPUT") or ""
+          full = os.environ.get("FULL_DISPATCH") or os.environ.get("FULL_INPUT") or ""
+          bg_url = os.environ.get("BG_URL_DISPATCH") or os.environ.get("BG_URL_INPUT") or ""
+          voice = os.environ.get("VOICE_DISPATCH") or os.environ.get("VOICE_INPUT") or "vi-VN-HoaiMyNeural"
+          if not summary.strip():
+            raise SystemExit("Missing summary")
+          if not full.strip():
+            raise SystemExit("Missing full")
+          if not bg_url.strip():
+            raise SystemExit("Missing background_url")
+          open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
+          open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
+          open("work/bg_url.txt","w",encoding="utf-8").write(bg_url.strip()+"\n")
+          open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
+          print("OK: wrote summary/full/bg_url/voice")
+          PY
 
-def wrap_text(text, max_chars_per_line):
-    """Wrap text by words"""
-    words = text.split()
-    lines = []
-    current_line = []
-    
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        if len(test_line) <= max_chars_per_line:
-            current_line.append(word)
-        else:
-            if current_line:
-                lines.append(' '.join(current_line))
-            current_line = [word]
-    
-    if current_line:
-        lines.append(' '.join(current_line))
-    
-    return lines
+      - name: Prepare title + upload.txt
+        id: prep
+        run: |
+          set -euo pipefail
+          export TZ=Asia/Tokyo
+          DATE="$(date +%Y-%m-%d)"
+          python3 - <<'PY'
+          import re
+          s=open("work/summary.txt","r",encoding="utf-8").read().strip()
+          s=re.sub(r"\s+"," ",s)
+          short = (s[:60] + "…") if len(s) > 60 else s
+          open("work/summary_oneline.txt","w",encoding="utf-8").write(s+"\n")
+          open("work/summary_short.txt","w",encoding="utf-8").write(short+"\n")
+          PY
+          SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
+          SHORT="$(cat work/summary_short.txt)"
+          TITLE="${DATE} ${SHORT}"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          cat > work/upload.txt <<EOF
+          Title: $TITLE
+          Date: $DATE
 
-def create_text_frame(width, height, text, font_size, text_color, bg_color1, bg_color2, t, duration):
-    """Create a frame with gradient background and centered text"""
-    # Create gradient background
-    img = create_gradient_background(width, height, hex_to_rgb(bg_color1), hex_to_rgb(bg_color2))
-    
-    # Apply blur and vignette
-    img = img.filter(ImageFilter.GaussianBlur(radius=18))
-    
-    # Add vignette
-    vignette = Image.new('L', (width, height), 0)
-    draw_vig = ImageDraw.Draw(vignette)
-    center_x, center_y = width // 2, height // 2
-    max_radius = min(width, height) * 0.7
-    
-    for y in range(height):
-        for x in range(width):
-            distance = ((x - center_x)**2 + (y - center_y)**2)**0.5
-            if distance < max_radius:
-                alpha = 255
-            else:
-                alpha = int(255 * max(0, 1 - (distance - max_radius) / (max_radius * 0.3)))
-            vignette.putpixel((x, y), alpha)
-    
-    black_layer = Image.new('RGB', (width, height), (0, 0, 0))
-    img = Image.composite(img, black_layer, vignette)
-    
-    # Add slight zoom effect
-    zoom = 1 + 0.00035 * (t * 30)  # 30fps approximation
-    if zoom > 1:
-        new_size = (int(width * zoom), int(height * zoom))
-        img_zoomed = img.resize(new_size, Image.LANCZOS)
-        left = (new_size[0] - width) // 2
-        top = (new_size[1] - height) // 2
-        img = img_zoomed.crop((left, top, left + width, top + height))
-    
-    # Draw text
-    draw = ImageDraw.Draw(img)
-    
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", font_size)
-    except:
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-        except:
-            font = ImageFont.load_default()
-    
-    lines = text.split('\n')
-    line_height = font_size + 18
-    total_height = len(lines) * line_height
-    
-    y_offset = (height - total_height) // 2
-    
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (width - text_width) // 2
-        
-        # Draw shadow
-        draw.text((x+2, y_offset+2), line, font=font, fill=(0, 0, 0, 64))
-        
-        # Draw text with semi-transparent box
-        padding = 46
-        draw.rectangle([x-padding, y_offset-padding//2, x+text_width+padding, y_offset+line_height-padding//2], 
-                      fill=(0, 0, 0, 97))
-        draw.text((x, y_offset), line, font=font, fill=hex_to_rgb(text_color))
-        
-        y_offset += line_height
-    
-    return np.array(img)
+          Summary:
+          $SUMMARY_ONELINE
 
-def create_rain_effect(width, height, t, fps=30):
-    """Create rain effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 1000))
-    num_drops = 150
-    
-    for _ in range(num_drops):
-        x = random.randint(0, width)
-        y_offset = (t * 900) % (height * 2)
-        y = (random.randint(0, height * 2) + y_offset) % (height * 2)
-        
-        if y < height:
-            length = random.randint(10, 25)
-            alpha = random.randint(40, 80)
-            draw.line([(x, y), (x, y + length)], fill=(255, 255, 255, alpha), width=1)
-    
-    return np.array(overlay)
+          Full text:
+          $(cat work/full.txt)
+          EOF
 
-def create_snow_effect(width, height, t, fps=30):
-    """Create snow effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 1000))
-    num_flakes = 120
-    
-    for _ in range(num_flakes):
-        x = (random.randint(0, width) + t * 40) % width
-        y = (random.randint(0, height * 2) + t * 280) % (height * 2)
-        
-        if y < height:
-            size = random.randint(2, 6)
-            alpha = random.randint(100, 150)
-            draw.ellipse([x, y, x+size, y+size], fill=(255, 255, 255, alpha))
-    
-    return np.array(overlay)
+      - name: Download background image
+        run: |
+          set -euo pipefail
+          BG_URL="$(cat work/bg_url.txt)"
+          curl -sS -L "$BG_URL" --output work/background.jpg
+          if [ ! -s work/background.jpg ]; then
+            echo "background.jpg download failed."
+            exit 1
+          fi
 
-def create_fireworks_effect(width, height, t, fps=30):
-    """Create fireworks effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 500))
-    num_bursts = 5
-    
-    for _ in range(num_bursts):
-        cx = random.randint(100, width-100)
-        cy = random.randint(100, height-100)
-        phase = (t * 3) % 2
-        
-        if phase < 1:
-            num_particles = 40
-            for i in range(num_particles):
-                angle = (i / num_particles) * 2 * np.pi
-                distance = phase * 150
-                x = int(cx + np.cos(angle) * distance)
-                y = int(cy + np.sin(angle) * distance)
-                
-                if 0 <= x < width and 0 <= y < height:
-                    hue = (i / num_particles) 
-                    rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-                    color = tuple(int(c * 255) for c in rgb)
-                    alpha = int(255 * (1 - phase))
-                    draw.ellipse([x-3, y-3, x+3, y+3], fill=color + (alpha,))
-    
-    return np.array(overlay)
+      - name: Generate TTS from full text (mp3)
+        run: |
+          set -euo pipefail
+          VOICE="$(cat work/voice.txt)"
+          curl -sS -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
+            --output work/tts.mp3
+          if [ ! -s work/tts.mp3 ]; then
+            echo "tts.mp3 is empty. TTS request failed."
+            exit 1
+          fi
 
-def create_confetti_effect(width, height, t, fps=30):
-    """Create confetti effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 1000))
-    num_pieces = 80
-    
-    for _ in range(num_pieces):
-        x = (random.randint(0, width) + t * 90) % width
-        y = (random.randint(0, height * 2) + t * 650) % (height * 2)
-        
-        if y < height:
-            hue = random.random()
-            rgb = colorsys.hsv_to_rgb(hue, 0.9, 1.0)
-            color = tuple(int(c * 255) for c in rgb)
-            
-            size = random.randint(5, 12)
-            rotation = (t * 360 + random.randint(0, 360)) % 360
-            alpha = random.randint(100, 180)
-            
-            draw.rectangle([x, y, x+size, y+size], fill=color + (alpha,))
-    
-    return np.array(overlay)
+      - name: Wrap summary text for video
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import re
+          src = open("work/summary.txt","r",encoding="utf-8").read().strip()
+          src = re.sub(r"\s+"," ",src)
+          def wrap(src, max_chars=26, max_lines=7):
+            words = src.split(" ")
+            lines, cur = [], []
+            for w in words:
+              if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
+                cur.append(w)
+              else:
+                lines.append(" ".join(cur))
+                cur = [w]
+            if cur: lines.append(" ".join(cur))
+            if len(lines) > max_lines:
+              lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
+            return "\n".join(lines)
+          open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
+          open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
+          PY
 
-def create_bokeh_effect(width, height, t, fps=30):
-    """Create bokeh light effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 500))
-    num_lights = 30
-    
-    for _ in range(num_lights):
-        x = random.randint(0, width)
-        y = (random.randint(0, height * 2) + t * 120) % (height * 2)
-        
-        if y < height:
-            size = random.randint(30, 80)
-            alpha = random.randint(30, 60)
-            hue = random.random()
-            rgb = colorsys.hsv_to_rgb(hue, 0.5, 1.0)
-            color = tuple(int(c * 255) for c in rgb)
-            
-            # Create gradient circle
-            for r in range(size, 0, -5):
-                a = int(alpha * (r / size))
-                draw.ellipse([x-r, y-r, x+r, y+r], fill=color + (a,))
-    
-    return np.array(overlay)
+      - name: Render TikTok (1080x1920) + audio
+        run: |
+          set -euo pipefail
+          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+          DUR_S=$(python3 - <<PY
+          dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
+          FADE_OUT_START=$(python3 - <<PY
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
+          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+          if [ ! -f "$FONT" ]; then
+            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
+          fi
+          ffmpeg -y \
+            -loop 1 -i work/background.jpg \
+            -i work/tts.mp3 \
+            -filter_complex "\
+              [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920, \
+                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
+              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=white:line_spacing=18: \
+                box=1:boxcolor=black@0.50:boxborderw=46:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
+            -map "[v]" -map "1:a" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
+            -c:a aac -b:a 192k \
+            -t ${DUR_S} work/tiktok.mp4
 
-def create_stars_effect(width, height, t, fps=30):
-    """Create twinkling stars effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(42)  # Fixed seed for star positions
-    num_stars = 100
-    
-    for i in range(num_stars):
-        x = random.randint(0, width)
-        y = random.randint(0, height)
-        
-        # Twinkle effect
-        twinkle = abs(np.sin(t * 2 + i * 0.5))
-        size = int(2 + twinkle * 3)
-        alpha = int(100 + twinkle * 155)
-        
-        draw.ellipse([x-size, y-size, x+size, y+size], fill=(255, 255, 255, alpha))
-    
-    return np.array(overlay)
+      - name: Render YouTube (1920x1080) + audio
+        run: |
+          set -euo pipefail
+          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+          DUR_S=$(python3 - <<PY
+          dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
+          FADE_OUT_START=$(python3 - <<PY
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
+          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+          if [ ! -f "$FONT" ]; then
+            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
+          fi
+          ffmpeg -y \
+            -loop 1 -i work/background.jpg \
+            -i work/tts.mp3 \
+            -filter_complex "\
+              [0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080, \
+                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
+              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=white:line_spacing=16: \
+                box=1:boxcolor=black@0.48:boxborderw=40:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
+            -map "[v]" -map "1:a" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
+            -c:a aac -b:a 192k \
+            -t ${DUR_S} work/youtube.mp4
 
-def create_bubbles_effect(width, height, t, fps=30):
-    """Create floating bubbles effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 1000))
-    num_bubbles = 40
-    
-    for _ in range(num_bubbles):
-        x = (random.randint(0, width) + t * 30) % width
-        y_start = height - (random.randint(0, height * 2) + t * 420) % (height * 2)
-        
-        if 0 <= y_start < height:
-            size = random.randint(15, 45)
-            alpha = random.randint(40, 80)
-            
-            # Outer circle
-            draw.ellipse([x-size, y_start-size, x+size, y_start+size], 
-                        outline=(200, 230, 255, alpha), width=2)
-            # Highlight
-            highlight_size = size // 3
-            draw.ellipse([x-size//2, y_start-size//2, 
-                         x-size//2+highlight_size, y_start-size//2+highlight_size],
-                        fill=(255, 255, 255, alpha//2))
-    
-    return np.array(overlay)
+      - name: Upload to Telegram (caption = date + summary short)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TITLE: ${{ steps.prep.outputs.title }}
+        run: |
+          set -euo pipefail
+          CAPTION="$TITLE"
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
+            -F chat_id="$TG_CHAT_ID" \
+            -F caption="$CAPTION" \
+            -F video=@work/tiktok.mp4 | jq .
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
+            -F chat_id="$TG_CHAT_ID" \
+            -F caption="$CAPTION" \
+            -F video=@work/youtube.mp4 | jq .
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+            -F chat_id="$TG_CHAT_ID" \
+            -F caption="$CAPTION" \
+            -F document=@work/upload.txt | jq .
 
-def create_scanlines_effect(width, height, t, fps=30):
-    """Create CRT scanlines effect"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    line_spacing = 6
-    offset = int(t * 60) % line_spacing
-    
-    for y in range(-offset, height, line_spacing):
-        draw.line([(0, y), (width, y)], fill=(0, 0, 0, 90), width=1)
-    
-    return np.array(overlay)
-
-def create_sparkle_effect(width, height, t, fps=30):
-    """Create sparkle/particle effect with color shift"""
-    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    
-    random.seed(int(t * 1000))
-    num_sparkles = 60
-    
-    hue_shift = (t * 20) % 360 / 360
-    
-    for _ in range(num_sparkles):
-        x = random.randint(0, width)
-        y = random.randint(0, height)
-        
-        hue = (hue_shift + random.random() * 0.3) % 1.0
-        rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-        color = tuple(int(c * 255) for c in rgb)
-        
-        pulse = abs(np.sin(t * 3 + random.random() * np.pi))
-        size = int(2 + pulse * 4)
-        alpha = int(80 + pulse * 175)
-        
-        draw.ellipse([x-size, y-size, x+size, y+size], fill=color + (alpha,))
-    
-    return np.array(overlay)
-
-def create_video_frame(t, width, height, text, font_size, text_color, bg_color1, bg_color2, effect_type, duration):
-    """Create a complete video frame with text and effects"""
-    # Base frame with text
-    base = create_text_frame(width, height, text, font_size, text_color, bg_color1, bg_color2, t, duration)
-    
-    # Create effect overlay
-    if effect_type == 'rain':
-        effect = create_rain_effect(width, height, t)
-    elif effect_type == 'snow':
-        effect = create_snow_effect(width, height, t)
-    elif effect_type == 'fireworks':
-        effect = create_fireworks_effect(width, height, t)
-    elif effect_type == 'confetti':
-        effect = create_confetti_effect(width, height, t)
-    elif effect_type == 'bokeh':
-        effect = create_bokeh_effect(width, height, t)
-    elif effect_type == 'stars':
-        effect = create_stars_effect(width, height, t)
-    elif effect_type == 'bubbles':
-        effect = create_bubbles_effect(width, height, t)
-    elif effect_type == 'scanlines':
-        effect = create_scanlines_effect(width, height, t)
-    else:  # sparkle
-        effect = create_sparkle_effect(width, height, t)
-    
-    # Composite effect over base
-    base_img = Image.fromarray(base)
-    effect_img = Image.fromarray(effect)
-    base_img.paste(effect_img, (0, 0), effect_img)
-    
-    return np.array(base_img)
-
-def render_video(width, height, text, font_size, text_color, bg_color1, bg_color2, 
-                effect_type, audio_path, output_path, duration):
-    """Render final video with audio"""
-    
-    fps = 30
-    
-    # Create video clip
-    video_clip = VideoClip(
-        lambda t: create_video_frame(t, width, height, text, font_size, text_color, 
-                                    bg_color1, bg_color2, effect_type, duration),
-        duration=duration
-    )
-    video_clip = video_clip.set_fps(fps)
-    
-    # Add fade in/out
-    video_clip = fadein(video_clip, 0.4)
-    video_clip = fadeout(video_clip, 0.7)
-    
-    # Add audio
-    audio_clip = AudioFileClip(audio_path)
-    video_clip = video_clip.set_audio(audio_clip)
-    
-    # Write video file
-    video_clip.write_videofile(
-        output_path,
-        fps=fps,
-        codec='libx264',
-        audio_codec='aac',
-        preset='veryfast',
-        threads=4,
-        logger=None
-    )
-    
-    # Clean up
-    video_clip.close()
-    audio_clip.close()
-
-if __name__ == '__main__':
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Render video with MoviePy')
-    parser.add_argument('--width', type=int, required=True)
-    parser.add_argument('--height', type=int, required=True)
-    parser.add_argument('--text', type=str, required=True)
-    parser.add_argument('--font-size', type=int, required=True)
-    parser.add_argument('--text-color', type=str, required=True)
-    parser.add_argument('--bg-color1', type=str, required=True)
-    parser.add_argument('--bg-color2', type=str, required=True)
-    parser.add_argument('--effect', type=str, required=True)
-    parser.add_argument('--audio', type=str, required=True)
-    parser.add_argument('--output', type=str, required=True)
-    parser.add_argument('--duration', type=float, required=True)
-    
-    args = parser.parse_args()
-    
-    print(f"Rendering {args.width}x{args.height} video with {args.effect} effect...")
-    
-    render_video(
-        args.width, args.height, args.text, args.font_size,
-        args.text_color, args.bg_color1, args.bg_color2,
-        args.effect, args.audio, args.output, args.duration
-    )
-    
-    print(f"Video saved to {args.output}")
+      - name: Upload artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: |
+            work/tts.mp3
+            work/tiktok.mp4
+            work/youtube.mp4
+            work/upload.txt
