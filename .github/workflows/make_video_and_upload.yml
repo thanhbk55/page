@@ -11,6 +11,9 @@ on:
       full:
         description: "Full text (used for TTS audio)"
         required: true
+      background_url:
+        description: "Background image URL"
+        required: true
       voice:
         description: "TTS voice"
         required: false
@@ -29,9 +32,11 @@ jobs:
         env:
           SUMMARY_DISPATCH: ${{ github.event.client_payload.summary }}
           FULL_DISPATCH: ${{ github.event.client_payload.full }}
+          BG_URL_DISPATCH: ${{ github.event.client_payload.background_url }}
           VOICE_DISPATCH: ${{ github.event.client_payload.voice }}
           SUMMARY_INPUT: ${{ inputs.summary }}
           FULL_INPUT: ${{ inputs.full }}
+          BG_URL_INPUT: ${{ inputs.background_url }}
           VOICE_INPUT: ${{ inputs.voice }}
         run: |
           set -euo pipefail
@@ -40,15 +45,19 @@ jobs:
           import os
           summary = os.environ.get("SUMMARY_DISPATCH") or os.environ.get("SUMMARY_INPUT") or ""
           full = os.environ.get("FULL_DISPATCH") or os.environ.get("FULL_INPUT") or ""
+          bg_url = os.environ.get("BG_URL_DISPATCH") or os.environ.get("BG_URL_INPUT") or ""
           voice = os.environ.get("VOICE_DISPATCH") or os.environ.get("VOICE_INPUT") or "vi-VN-HoaiMyNeural"
           if not summary.strip():
             raise SystemExit("Missing summary")
           if not full.strip():
             raise SystemExit("Missing full")
+          if not bg_url.strip():
+            raise SystemExit("Missing background_url")
           open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
           open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
+          open("work/bg_url.txt","w",encoding="utf-8").write(bg_url.strip()+"\n")
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
-          print("OK: wrote summary/full/voice")
+          print("OK: wrote summary/full/bg_url/voice")
           PY
 
       - name: Prepare title + upload.txt
@@ -81,6 +90,16 @@ jobs:
           Full text:
           $(cat work/full.txt)
           EOF
+
+      - name: Download background image
+        run: |
+          set -euo pipefail
+          BG_URL="$(cat work/bg_url.txt)"
+          curl -sS -L "$BG_URL" --output work/background.jpg
+          if [ ! -s work/background.jpg ]; then
+            echo "background.jpg download failed."
+            exit 1
+          fi
 
       - name: Generate TTS from full text (mp3)
         run: |
@@ -119,24 +138,6 @@ jobs:
           open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
           PY
 
-      - name: Pick random colors + effect (many)
-        id: theme
-        run: |
-          set -euo pipefail
-          BG1_LIST=( "#0B1026" "#120B2E" "#052B2B" "#1B1020" "#0C1B2A" "#19140D" )
-          BG2_LIST=( "#3A7BD5" "#7B2FF7" "#00C6A7" "#FF4D6D" "#F7B733" "#2BC0E4" "#F857A6" "#00F5A0" )
-          TXT_LIST=( "#FFFFFF" "#EAF2FF" "#FFF7E6" "#E7FFE8" "#F3E8FF" "#FFEAF1" "#F6FFFE" )
-          BG1="${BG1_LIST[$((RANDOM % ${#BG1_LIST[@]}))]}"
-          BG2="${BG2_LIST[$((RANDOM % ${#BG2_LIST[@]}))]}"
-          TXT="${TXT_LIST[$((RANDOM % ${#TXT_LIST[@]}))]}"
-          EFFECTS=(rain snow fireworks confetti bokeh stars bubbles scanlines sparkle)
-          EFFECT="${EFFECTS[$((RANDOM % ${#EFFECTS[@]}))]}"
-          echo "bg1=$BG1" >> "$GITHUB_OUTPUT"
-          echo "bg2=$BG2" >> "$GITHUB_OUTPUT"
-          echo "txt=$TXT" >> "$GITHUB_OUTPUT"
-          echo "effect=$EFFECT" >> "$GITHUB_OUTPUT"
-          echo "Theme: bg1=$BG1 bg2=$BG2 txt=$TXT effect=$EFFECT"
-
       - name: Render TikTok (1080x1920) + audio
         run: |
           set -euo pipefail
@@ -153,47 +154,20 @@ jobs:
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-          BG1="${{ steps.theme.outputs.bg1 }}"
-          BG2="${{ steps.theme.outputs.bg2 }}"
-          TXT="${{ steps.theme.outputs.txt }}"
-          EFFECT="${{ steps.theme.outputs.effect }}"
-          if [ "$EFFECT" = "rain" ]; then
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
-          elif [ "$EFFECT" = "snow" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.20,crop=1080:1920:x='mod(t*40,140)':y='mod(t*280,1920)'"
-          elif [ "$EFFECT" = "fireworks" ]; then
-            EFFECT_GRAPH="cellauto=s=540x960:rule=110:r=30,scale=1080:1920,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.22"
-          elif [ "$EFFECT" = "confetti" ]; then
-            EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.18,scale=1080:3840,crop=1080:1920:x='mod(t*90,120)':y='mod(t*650,1920)'"
-          elif [ "$EFFECT" = "bokeh" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1080:3840,gblur=sigma=8,format=rgba,colorchannelmixer=aa=0.18,crop=1080:1920:x=0:y='mod(t*120,1920)'"
-          elif [ "$EFFECT" = "stars" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1080:3840,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*600,1920)'"
-          elif [ "$EFFECT" = "bubbles" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.16,scale=1080:3840,crop=1080:1920:x='mod(t*30,120)':y='1920-mod(t*420,1920)'"
-          elif [ "$EFFECT" = "scanlines" ]; then
-            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,90)',format=rgba,scale=1080:1920,colorchannelmixer=aa=0.25"
-          else
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.20"
-          fi
           ffmpeg -y \
-            -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG1}" \
-            -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG2}" \
-            -f lavfi -i "color=s=1080x1920:r=30:d=${DUR_S}:c=black" \
+            -loop 1 -i work/background.jpg \
             -i work/tts.mp3 \
             -filter_complex "\
-              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/5, \
-                zoompan=z='1+0.00035*on':x='(iw-1080)/2':y='(ih-1920)/2':d=1:s=1080x1920:fps=30[base]; \
-              [2:v]${EFFECT_GRAPH}[fx]; \
-              [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
-              [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
-                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=${TXT}:line_spacing=18: \
-                box=1:boxcolor=black@0.38:boxborderw=46:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
+              [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920, \
+                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
+              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=white:line_spacing=18: \
+                box=1:boxcolor=black@0.50:boxborderw=46:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
                 fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
-            -map "[v]" -map "3:a" \
+            -map "[v]" -map "1:a" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
             -c:a aac -b:a 192k \
-            -shortest work/tiktok.mp4
+            -t ${DUR_S} work/tiktok.mp4
 
       - name: Render YouTube (1920x1080) + audio
         run: |
@@ -211,47 +185,20 @@ jobs:
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-          BG1="${{ steps.theme.outputs.bg1 }}"
-          BG2="${{ steps.theme.outputs.bg2 }}"
-          TXT="${{ steps.theme.outputs.txt }}"
-          EFFECT="${{ steps.theme.outputs.effect }}"
-          if [ "$EFFECT" = "rain" ]; then
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*700,1080)'"
-          elif [ "$EFFECT" = "snow" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.16,crop=1920:1080:x='mod(t*35,160)':y='mod(t*220,1080)'"
-          elif [ "$EFFECT" = "fireworks" ]; then
-            EFFECT_GRAPH="cellauto=s=960x540:rule=110:r=30,scale=1920:1080,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.18"
-          elif [ "$EFFECT" = "confetti" ]; then
-            EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.14,scale=1920:2160,crop=1920:1080:x='mod(t*120,200)':y='mod(t*420,1080)'"
-          elif [ "$EFFECT" = "bokeh" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1920:2160,gblur=sigma=10,format=rgba,colorchannelmixer=aa=0.14,crop=1920:1080:x=0:y='mod(t*100,1080)'"
-          elif [ "$EFFECT" = "stars" ]; then
-            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1920:2160,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*480,1080)'"
-          elif [ "$EFFECT" = "bubbles" ]; then
-            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.12,scale=1920:2160,crop=1920:1080:x='mod(t*30,180)':y='1080-mod(t*260,1080)'"
-          elif [ "$EFFECT" = "scanlines" ]; then
-            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,80)',format=rgba,scale=1920:1080,colorchannelmixer=aa=0.20"
-          else
-            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.15"
-          fi
           ffmpeg -y \
-            -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG1}" \
-            -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG2}" \
-            -f lavfi -i "color=s=1920x1080:r=30:d=${DUR_S}:c=black" \
+            -loop 1 -i work/background.jpg \
             -i work/tts.mp3 \
             -filter_complex "\
-              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/6, \
-                zoompan=z='1+0.00030*on':x='(iw-1920)/2':y='(ih-1080)/2':d=1:s=1920x1080:fps=30[base]; \
-              [2:v]${EFFECT_GRAPH}[fx]; \
-              [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
-              [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
-                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=${TXT}:line_spacing=16: \
-                box=1:boxcolor=black@0.36:boxborderw=40:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
+              [0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080, \
+                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
+              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=white:line_spacing=16: \
+                box=1:boxcolor=black@0.48:boxborderw=40:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
                 fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
-            -map "[v]" -map "3:a" \
+            -map "[v]" -map "1:a" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
             -c:a aac -b:a 192k \
-            -shortest work/youtube.mp4
+            -t ${DUR_S} work/youtube.mp4
 
       - name: Upload to Telegram (caption = date + summary short)
         env:
