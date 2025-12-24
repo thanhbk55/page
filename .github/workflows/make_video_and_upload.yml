@@ -23,27 +23,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 python3-pip
-          # Ensure pip and python3 use same environment
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install --user moviepy==2.1.1 pillow numpy imageio-ffmpeg
-          # Verify with same python3
-          python3 << 'PYCHECK'
-          import sys
-          print("Python executable:", sys.executable)
-          print("Python path:", sys.path)
-          try:
-              import moviepy.editor as mp
-              import PIL
-              import numpy as np
-              print("✓ All imports successful!")
-              print("MoviePy version:", mp.__version__)
-          except Exception as e:
-              print(f"✗ Import failed: {e}")
-              import site
-              print("User site-packages:", site.USER_SITE)
-              exit(1)
-          PYCHECK
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
       - name: Write inputs to files (safe)
         env:
@@ -157,284 +137,121 @@ jobs:
           echo "effect=$EFFECT" >> "$GITHUB_OUTPUT"
           echo "Theme: bg1=$BG1 bg2=$BG2 txt=$TXT effect=$EFFECT"
 
-      - name: Render videos with MoviePy (TikTok + YouTube)
-        env:
-          BG1: ${{ steps.theme.outputs.bg1 }}
-          BG2: ${{ steps.theme.outputs.bg2 }}
-          TXT: ${{ steps.theme.outputs.txt }}
-          EFFECT: ${{ steps.theme.outputs.effect }}
+      - name: Render TikTok (1080x1920) + audio
         run: |
-          python3 - << 'PYSCRIPT'
-          import os, random, math
-          from PIL import Image, ImageDraw, ImageFont, ImageFilter
-          import numpy as np
-          from moviepy.editor import ImageSequenceClip, AudioFileClip, CompositeVideoClip, VideoClip
-          from moviepy.video.fx.all import fadein, fadeout
+          set -euo pipefail
+          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+          DUR_S=$(python3 - <<PY
+          dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
+          FADE_OUT_START=$(python3 - <<PY
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
+          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+          if [ ! -f "$FONT" ]; then
+            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
+          fi
+          BG1="${{ steps.theme.outputs.bg1 }}"
+          BG2="${{ steps.theme.outputs.bg2 }}"
+          TXT="${{ steps.theme.outputs.txt }}"
+          EFFECT="${{ steps.theme.outputs.effect }}"
+          if [ "$EFFECT" = "rain" ]; then
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*900,1920)'"
+          elif [ "$EFFECT" = "snow" ]; then
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1080:3840:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.20,crop=1080:1920:x='mod(t*40,140)':y='mod(t*280,1920)'"
+          elif [ "$EFFECT" = "fireworks" ]; then
+            EFFECT_GRAPH="cellauto=s=540x960:rule=110:r=30,scale=1080:1920,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.22"
+          elif [ "$EFFECT" = "confetti" ]; then
+            EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.18,scale=1080:3840,crop=1080:1920:x='mod(t*90,120)':y='mod(t*650,1920)'"
+          elif [ "$EFFECT" = "bokeh" ]; then
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1080:3840,gblur=sigma=8,format=rgba,colorchannelmixer=aa=0.18,crop=1080:1920:x=0:y='mod(t*120,1920)'"
+          elif [ "$EFFECT" = "stars" ]; then
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1080:3840,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.22,crop=1080:1920:x=0:y='mod(t*600,1920)'"
+          elif [ "$EFFECT" = "bubbles" ]; then
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.16,scale=1080:3840,crop=1080:1920:x='mod(t*30,120)':y='1920-mod(t*420,1920)'"
+          elif [ "$EFFECT" = "scanlines" ]; then
+            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,90)',format=rgba,scale=1080:1920,colorchannelmixer=aa=0.25"
+          else
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.20"
+          fi
+          ffmpeg -y \
+            -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG1}" \
+            -f lavfi -i "color=s=1296x2304:r=30:d=${DUR_S}:c=${BG2}" \
+            -f lavfi -i "color=s=1080x1920:r=30:d=${DUR_S}:c=black" \
+            -i work/tts.mp3 \
+            -filter_complex "\
+              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/5, \
+                zoompan=z='1+0.00035*on':x='(iw-1080)/2':y='(ih-1920)/2':d=1:s=1080x1920:fps=30[base]; \
+              [2:v]${EFFECT_GRAPH}[fx]; \
+              [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
+              [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=${TXT}:line_spacing=18: \
+                box=1:boxcolor=black@0.38:boxborderw=46:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
+            -map "[v]" -map "3:a" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
+            -c:a aac -b:a 192k \
+            -shortest work/tiktok.mp4
 
-          # Get env vars
-          bg1 = os.environ['BG1']
-          bg2 = os.environ['BG2']
-          txt_color = os.environ['TXT']
-          effect = os.environ['EFFECT']
-          
-          # Read summary text
-          with open('work/summary_wrapped_tiktok.txt', 'r', encoding='utf-8') as f:
-              text_tiktok = f.read()
-          with open('work/summary_wrapped_youtube.txt', 'r', encoding='utf-8') as f:
-              text_youtube = f.read()
-          
-          # Get audio duration
-          audio = AudioFileClip('work/tts.mp3')
-          duration = audio.duration
-          fps = 30
-          total_frames = int(duration * fps)
-          
-          def hex_to_rgb(hex_color):
-              hex_color = hex_color.lstrip('#')
-              return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-          
-          rgb1 = hex_to_rgb(bg1)
-          rgb2 = hex_to_rgb(bg2)
-          txt_rgb = hex_to_rgb(txt_color)
-          
-          # Particle systems for different effects
-          class ParticleSystem:
-              def __init__(self, width, height, effect_type):
-                  self.width = width
-                  self.height = height
-                  self.effect = effect_type
-                  self.particles = []
-                  self.init_particles()
-              
-              def init_particles(self):
-                  if self.effect == 'rain':
-                      for _ in range(80):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': random.uniform(-self.height, 0),
-                              'speed': random.uniform(15, 25),
-                              'length': random.uniform(15, 30),
-                              'opacity': random.randint(80, 180)
-                          })
-                  elif self.effect == 'snow':
-                      for _ in range(100):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': random.uniform(-self.height, 0),
-                              'speed': random.uniform(1, 3),
-                              'size': random.uniform(2, 6),
-                              'drift': random.uniform(-0.5, 0.5),
-                              'opacity': random.randint(100, 200)
-                          })
-                  elif self.effect == 'confetti':
-                      for _ in range(60):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': random.uniform(-self.height, 0),
-                              'speed': random.uniform(2, 5),
-                              'rotation': random.uniform(0, 360),
-                              'rot_speed': random.uniform(-10, 10),
-                              'color': tuple(random.randint(100, 255) for _ in range(3)),
-                              'size': random.uniform(3, 8)
-                          })
-                  elif self.effect == 'bokeh':
-                      for _ in range(30):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': random.uniform(0, self.height),
-                              'size': random.uniform(20, 60),
-                              'speed_y': random.uniform(0.3, 1),
-                              'opacity': random.randint(30, 80),
-                              'color': tuple(random.randint(150, 255) for _ in range(3))
-                          })
-                  elif self.effect == 'stars':
-                      for _ in range(80):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': random.uniform(0, self.height),
-                              'size': random.uniform(1, 4),
-                              'twinkle_speed': random.uniform(0.05, 0.15),
-                              'phase': random.uniform(0, math.pi * 2)
-                          })
-                  elif self.effect == 'bubbles':
-                      for _ in range(40):
-                          self.particles.append({
-                              'x': random.uniform(0, self.width),
-                              'y': self.height + random.uniform(0, 200),
-                              'size': random.uniform(10, 30),
-                              'speed': random.uniform(1, 3),
-                              'drift': random.uniform(-0.3, 0.3),
-                              'opacity': random.randint(60, 120)
-                          })
-                  elif self.effect == 'fireworks':
-                      # Fireworks spawn dynamically
-                      pass
-              
-              def update(self, frame):
-                  if self.effect == 'rain':
-                      for p in self.particles:
-                          p['y'] += p['speed']
-                          if p['y'] > self.height:
-                              p['y'] = -50
-                              p['x'] = random.uniform(0, self.width)
-                  elif self.effect == 'snow':
-                      for p in self.particles:
-                          p['y'] += p['speed']
-                          p['x'] += p['drift']
-                          if p['y'] > self.height:
-                              p['y'] = -20
-                              p['x'] = random.uniform(0, self.width)
-                  elif self.effect == 'confetti':
-                      for p in self.particles:
-                          p['y'] += p['speed']
-                          p['rotation'] += p['rot_speed']
-                          if p['y'] > self.height:
-                              p['y'] = -20
-                              p['x'] = random.uniform(0, self.width)
-                  elif self.effect == 'bokeh':
-                      for p in self.particles:
-                          p['y'] += p['speed_y']
-                          if p['y'] > self.height + 100:
-                              p['y'] = -100
-                  elif self.effect == 'bubbles':
-                      for p in self.particles:
-                          p['y'] -= p['speed']
-                          p['x'] += p['drift']
-                          if p['y'] < -50:
-                              p['y'] = self.height + 50
-                              p['x'] = random.uniform(0, self.width)
-              
-              def draw(self, img, frame):
-                  draw = ImageDraw.Draw(img, 'RGBA')
-                  
-                  if self.effect == 'rain':
-                      for p in self.particles:
-                          draw.line([(p['x'], p['y']), (p['x'], p['y'] + p['length'])], 
-                                   fill=(255, 255, 255, p['opacity']), width=2)
-                  elif self.effect == 'snow':
-                      for p in self.particles:
-                          draw.ellipse([(p['x']-p['size'], p['y']-p['size']), 
-                                       (p['x']+p['size'], p['y']+p['size'])],
-                                      fill=(255, 255, 255, p['opacity']))
-                  elif self.effect == 'confetti':
-                      for p in self.particles:
-                          x, y = p['x'], p['y']
-                          size = p['size']
-                          draw.rectangle([(x-size, y-size), (x+size, y+size)], 
-                                        fill=p['color'] + (200,))
-                  elif self.effect == 'bokeh':
-                      for p in self.particles:
-                          size = p['size']
-                          draw.ellipse([(p['x']-size, p['y']-size), 
-                                       (p['x']+size, p['y']+size)],
-                                      fill=p['color'] + (p['opacity'],))
-                  elif self.effect == 'stars':
-                      for p in self.particles:
-                          brightness = int(128 + 127 * math.sin(frame * p['twinkle_speed'] + p['phase']))
-                          size = p['size']
-                          draw.ellipse([(p['x']-size, p['y']-size), 
-                                       (p['x']+size, p['y']+size)],
-                                      fill=(255, 255, 255, brightness))
-                  elif self.effect == 'bubbles':
-                      for p in self.particles:
-                          size = p['size']
-                          draw.ellipse([(p['x']-size, p['y']-size), 
-                                       (p['x']+size, p['y']+size)],
-                                      outline=(255, 255, 255, p['opacity']), width=2)
-                  elif self.effect == 'scanlines':
-                      for y in range(0, self.height, 6):
-                          offset = int((frame * 2) % 6)
-                          draw.line([(0, (y + offset) % self.height), 
-                                    (self.width, (y + offset) % self.height)], 
-                                   fill=(0, 0, 0, 90), width=1)
-          
-          def create_gradient_bg(width, height, color1, color2):
-              img = Image.new('RGB', (width, height))
-              draw = ImageDraw.Draw(img)
-              for y in range(height):
-                  ratio = y / height
-                  r = int(color1[0] * (1 - ratio) + color2[0] * ratio)
-                  g = int(color1[1] * (1 - ratio) + color2[1] * ratio)
-                  b = int(color1[2] * (1 - ratio) + color2[2] * ratio)
-                  draw.line([(0, y), (width, y)], fill=(r, g, b))
-              return img.filter(ImageFilter.GaussianBlur(20))
-          
-          def render_format(width, height, text, output_file):
-              print(f"Rendering {width}x{height}...")
-              
-              # Try to load font
-              try:
-                  font = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 
-                                           64 if width == 1080 else 56)
-              except:
-                  font = ImageFont.load_default()
-              
-              particle_sys = ParticleSystem(width, height, effect)
-              
-              frames = []
-              for frame_num in range(total_frames):
-                  # Create base gradient
-                  img = create_gradient_bg(width, height, rgb1, rgb2)
-                  
-                  # Add vignette
-                  vignette = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-                  vdraw = ImageDraw.Draw(vignette)
-                  for i in range(min(width, height) // 4):
-                      alpha = int(60 * (i / (min(width, height) // 4)))
-                      vdraw.rectangle([i, i, width-i, height-i], outline=(0, 0, 0, alpha))
-                  img = Image.alpha_composite(img.convert('RGBA'), vignette).convert('RGB')
-                  
-                  # Add particles
-                  particle_overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-                  particle_sys.update(frame_num)
-                  particle_sys.draw(particle_overlay, frame_num)
-                  img = Image.alpha_composite(img.convert('RGBA'), particle_overlay).convert('RGB')
-                  
-                  # Add text
-                  text_overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-                  tdraw = ImageDraw.Draw(text_overlay)
-                  
-                  # Draw text box background
-                  bbox = tdraw.multiline_textbbox((0, 0), text, font=font)
-                  text_width = bbox[2] - bbox[0]
-                  text_height = bbox[3] - bbox[1]
-                  box_x = (width - text_width) // 2 - 46
-                  box_y = (height - text_height) // 2 - 46
-                  tdraw.rectangle([box_x, box_y, box_x + text_width + 92, box_y + text_height + 92],
-                                 fill=(0, 0, 0, 97))
-                  
-                  # Draw text with shadow
-                  text_x = (width - text_width) // 2
-                  text_y = (height - text_height) // 2
-                  tdraw.multiline_text((text_x + 2, text_y + 2), text, font=font, 
-                                      fill=(0, 0, 0, 64), align='center')
-                  tdraw.multiline_text((text_x, text_y), text, font=font, 
-                                      fill=txt_rgb, align='center')
-                  
-                  img = Image.alpha_composite(img.convert('RGBA'), text_overlay).convert('RGB')
-                  
-                  frames.append(np.array(img))
-              
-              # Create video
-              clip = ImageSequenceClip(frames, fps=fps)
-              clip = clip.set_audio(audio)
-              
-              # Add fade in/out
-              clip = fadein(clip, 0.4)
-              clip = fadeout(clip, 0.7)
-              
-              # Export
-              clip.write_videofile(output_file, codec='libx264', audio_codec='aac',
-                                  preset='veryfast', bitrate='2000k', threads=4)
-              clip.close()
-              print(f"Done: {output_file}")
-          
-          # Render both formats
-          render_format(1080, 1920, text_tiktok, 'work/tiktok.mp4')
-          render_format(1920, 1080, text_youtube, 'work/youtube.mp4')
-          
-          audio.close()
-          PYSCRIPT
+      - name: Render YouTube (1920x1080) + audio
+        run: |
+          set -euo pipefail
+          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
+          DUR_S=$(python3 - <<PY
+          dur=float("$DUR"); print(max(1.0, dur))
+          PY
+          )
+          FADE_OUT_START=$(python3 - <<PY
+          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
+          PY
+          )
+          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+          if [ ! -f "$FONT" ]; then
+            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
+          fi
+          BG1="${{ steps.theme.outputs.bg1 }}"
+          BG2="${{ steps.theme.outputs.bg2 }}"
+          TXT="${{ steps.theme.outputs.txt }}"
+          EFFECT="${{ steps.theme.outputs.effect }}"
+          if [ "$EFFECT" = "rain" ]; then
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,245)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*700,1080)'"
+          elif [ "$EFFECT" = "snow" ]; then
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),scale=1920:2160:flags=neighbor,gblur=sigma=2,format=rgba,colorchannelmixer=aa=0.16,crop=1920:1080:x='mod(t*35,160)':y='mod(t*220,1080)'"
+          elif [ "$EFFECT" = "fireworks" ]; then
+            EFFECT_GRAPH="cellauto=s=960x540:rule=110:r=30,scale=1920:1080,format=rgba,gblur=sigma=6,colorchannelmixer=aa=0.18"
+          elif [ "$EFFECT" = "confetti" ]; then
+            EFFECT_GRAPH="noise=alls=7:allf=u,format=rgba,hue=H='360*t':s=1.6,eq=contrast=1.3,colorchannelmixer=aa=0.14,scale=1920:2160,crop=1920:1080:x='mod(t*120,200)':y='mod(t*420,1080)'"
+          elif [ "$EFFECT" = "bokeh" ]; then
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,235)\,255\,0),scale=1920:2160,gblur=sigma=10,format=rgba,colorchannelmixer=aa=0.14,crop=1920:1080:x=0:y='mod(t*100,1080)'"
+          elif [ "$EFFECT" = "stars" ]; then
+            EFFECT_GRAPH="noise=alls=5:allf=u,format=gray,lut=if(gt(val\,252)\,255\,0),scale=1920:2160,gblur=sigma=1,format=rgba,colorchannelmixer=aa=0.18,crop=1920:1080:x=0:y='mod(t*480,1080)'"
+          elif [ "$EFFECT" = "bubbles" ]; then
+            EFFECT_GRAPH="noise=alls=4:allf=u,format=gray,lut=if(gt(val\,248)\,255\,0),gblur=sigma=3,format=rgba,colorchannelmixer=aa=0.12,scale=1920:2160,crop=1920:1080:x='mod(t*30,180)':y='1080-mod(t*260,1080)'"
+          elif [ "$EFFECT" = "scanlines" ]; then
+            EFFECT_GRAPH="geq=r=0:g=0:b=0:a='if(mod(Y+t*60,6),0,80)',format=rgba,scale=1920:1080,colorchannelmixer=aa=0.20"
+          else
+            EFFECT_GRAPH="noise=alls=6:allf=u,format=gray,lut=if(gt(val\,250)\,255\,0),format=rgba,hue=H='20*t':s=1.8,gblur=sigma=2,colorchannelmixer=aa=0.15"
+          fi
+          ffmpeg -y \
+            -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG1}" \
+            -f lavfi -i "color=s=2304x1296:r=30:d=${DUR_S}:c=${BG2}" \
+            -f lavfi -i "color=s=1920x1080:r=30:d=${DUR_S}:c=black" \
+            -i work/tts.mp3 \
+            -filter_complex "\
+              [0:v][1:v]blend=all_mode=overlay:all_opacity=0.55,gblur=sigma=18,vignette=PI/6, \
+                zoompan=z='1+0.00030*on':x='(iw-1920)/2':y='(ih-1080)/2':d=1:s=1920x1080:fps=30[base]; \
+              [2:v]${EFFECT_GRAPH}[fx]; \
+              [base][fx]blend=all_mode=screen:all_opacity=0.95[bgfx]; \
+              [bgfx]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
+                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=${TXT}:line_spacing=16: \
+                box=1:boxcolor=black@0.36:boxborderw=40:shadowcolor=black@0.25:shadowx=2:shadowy=2, \
+                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
+            -map "[v]" -map "3:a" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
+            -c:a aac -b:a 192k \
+            -shortest work/youtube.mp4
 
       - name: Upload to Telegram (caption = date + summary short)
         env:
