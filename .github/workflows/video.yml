@@ -183,7 +183,7 @@ jobs:
                 --no-default-browser-check \
                 --disable-infobars \
                 --disable-features=Translate,TranslateUI \
-                --lang=vi \
+                --lang=ja \
                 --app="$URL" \
                 --kiosk \
                 --window-position=0,0 \
