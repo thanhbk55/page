@@ -38,6 +38,7 @@ jobs:
           chromium-browser --version || true
           chromium --version || true
           ffmpeg -version | head -n 2
+          ffprobe -version | head -n 2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -137,7 +138,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create web scene + puppeteer opener (no puppeteer-stream)
+      - name: Create web scene + puppeteer opener
         run: |
           set -euo pipefail
           mkdir -p web scripts
@@ -265,18 +266,16 @@ jobs:
           console.log("goto...");
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-          // Wait until bg loaded & loop started
           await page.waitForFunction(() => window.__READY__ === true, { timeout: 120000 });
           console.log("READY");
 
-          // Keep it alive while ffmpeg records
           const keepMs = Number(process.env.KEEP_MS || "65000");
           await new Promise(r => setTimeout(r, keepMs));
 
           await browser.close();
           JS
 
-      - name: Record 60s loop videos (tiktok + youtube) via ffmpeg x11grab
+      - name: Record loop videos via ffmpeg x11grab (tiktok + youtube)
         run: |
           set -euo pipefail
 
@@ -290,18 +289,17 @@ jobs:
               OUT="work/loop_tiktok.mp4"
             fi
 
-            # Xvfb in one shell so DISPLAY is shared by node + ffmpeg
             xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc "
               set -euo pipefail
-              export KEEP_MS=70000
+              export KEEP_MS=25000
               node scripts/open_scene.mjs $MODE &
               NP=\$!
               sleep 2
 
               echo \"DISPLAY=\$DISPLAY\"
-              # Record top-left region exactly W x H at 30fps for 60s
+              # Record 10s only (enough to loop), smaller output
               ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i \$DISPLAY+0,0 \
-                -t 60 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \"$OUT\"
+                -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \"$OUT\"
 
               kill \$NP || true
               wait \$NP || true
@@ -314,17 +312,43 @@ jobs:
           record_one tiktok
           record_one youtube
 
-      - name: Loop video to match audio + mux audio (TikTok)
+      - name: Loop video to match audio + mux audio (TikTok) [bounded by audio duration]
         run: |
           set -euo pipefail
-          ffmpeg -y -stream_loop -1 -i work/loop_tiktok.mp4 -i work/tts.mp3 \
-            -c:v copy -c:a aac -b:a 192k -shortest work/tiktok.mp4
+          ADUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts.mp3)
+          ADUR_CEIL=$(python3 - <<PY
+          import math
+          d=float("$ADUR")
+          print(math.ceil(d))
+          PY
+          )
+          echo "Audio duration(sec): $ADUR -> ceil=$ADUR_CEIL"
 
-      - name: Loop video to match audio + mux audio (YouTube)
+          ffmpeg -y -stream_loop -1 -i work/loop_tiktok.mp4 -i work/tts.mp3 \
+            -t "$ADUR_CEIL" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:a aac -b:a 192k \
+            -movflags +faststart \
+            work/tiktok.mp4
+
+      - name: Loop video to match audio + mux audio (YouTube) [bounded by audio duration]
         run: |
           set -euo pipefail
+          ADUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts.mp3)
+          ADUR_CEIL=$(python3 - <<PY
+          import math
+          d=float("$ADUR")
+          print(math.ceil(d))
+          PY
+          )
+          echo "Audio duration(sec): $ADUR -> ceil=$ADUR_CEIL"
+
           ffmpeg -y -stream_loop -1 -i work/loop_youtube.mp4 -i work/tts.mp3 \
-            -c:v copy -c:a aac -b:a 192k -shortest work/youtube.mp4
+            -t "$ADUR_CEIL" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:a aac -b:a 192k \
+            -movflags +faststart \
+            work/youtube.mp4
 
       - name: Upload to Telegram (caption = date + summary short)
         env:
