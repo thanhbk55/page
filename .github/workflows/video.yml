@@ -206,6 +206,7 @@ jobs:
           )
           ffmpeg -y -stream_loop -1 -i work/loop_tiktok.mp4 -i work/tts.mp3 \
             -t "$ADUR_CEIL" \
+            -vf "scale=720:1280" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/tiktok.mp4
@@ -221,6 +222,7 @@ jobs:
           )
           ffmpeg -y -stream_loop -1 -i work/loop_youtube.mp4 -i work/tts.mp3 \
             -t "$ADUR_CEIL" \
+            -vf "scale=1280:720" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/youtube.mp4
