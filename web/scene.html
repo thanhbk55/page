@@ -13,7 +13,7 @@
       position:fixed; inset:0;
       display:flex; align-items:center; justify-content:center;
       pointer-events:none;
-      padding: 6vh 6vw;
+      padding: 0 6vw;
     }
 
     /* Mode-driven sizing */
@@ -410,6 +410,7 @@
 
     // Mode-specific typography & card size
     const root = document.documentElement;
+    const overlay = document.querySelector(".overlay");
     if (mode === "youtube") {
       root.style.setProperty("--cardW", "68vw");
       root.style.setProperty("--cardH", "64vh");
@@ -417,6 +418,7 @@
       root.style.setProperty("--textSize", "40px");
       root.style.setProperty("--pad", "42px");
       root.style.setProperty("--clampLines", "5");
+      overlay.style.marginTop = "3vh"; 
     } else { // tiktok
       root.style.setProperty("--cardW", "84vw");
       root.style.setProperty("--cardH", "72vh");
@@ -424,6 +426,7 @@
       root.style.setProperty("--textSize", "44px");
       root.style.setProperty("--pad", "46px");
       root.style.setProperty("--clampLines", "10");
+      overlay.style.marginTop = "6vh";
     }
 
     const canvas = document.getElementById("c");
