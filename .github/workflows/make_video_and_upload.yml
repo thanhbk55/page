@@ -144,6 +144,9 @@ jobs:
           # local confetti bundle (no CDN/network)
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
 
+          # copy background into web/ to avoid reload+window injection issues
+          cp work/background.jpg web/background.jpg
+
           cat > web/scene.html <<'HTML'
           <!doctype html>
           <html>
@@ -173,6 +176,8 @@ jobs:
               const W = Number(params.get("w") || 1080);
               const H = Number(params.get("h") || 1920);
               const text = params.get("text") || "";
+              const bgParam = params.get("bg") || "./background.jpg";
+
               document.getElementById("t").textContent = text;
 
               const canvas = document.getElementById("c");
@@ -180,8 +185,12 @@ jobs:
               canvas.width = W; canvas.height = H;
 
               const bg = new Image();
-              bg.src = window.__BG__;
-              bg.onload = () => requestAnimationFrame(loop);
+              bg.src = new URL(bgParam, location.href).href;
+
+              bg.onload = () => {
+                window.__READY__ = true;
+                requestAnimationFrame(loop);
+              };
 
               function drawBg(){
                 const w = canvas.width, h = canvas.height;
@@ -223,8 +232,6 @@ jobs:
           const h = mode === "youtube" ? 1080 : 1920;
 
           const text = fs.readFileSync("work/summary_oneline.txt","utf8").trim();
-          const bg = fs.readFileSync("work/background.jpg").toString("base64");
-          const bgDataUrl = `data:image/jpeg;base64,${bg}`;
 
           const execPath =
             fs.existsSync("/usr/bin/chromium-browser") ? "/usr/bin/chromium-browser" :
@@ -245,6 +252,8 @@ jobs:
               "--no-sandbox",
               "--disable-setuid-sandbox",
               "--disable-dev-shm-usage",
+              "--disable-gpu",
+              "--autoplay-policy=no-user-gesture-required",
               `--window-size=${w},${h}`,
               `--disable-extensions-except=${extPath}`,
               `--load-extension=${extPath}`,
@@ -259,22 +268,24 @@ jobs:
           page.on("console", (msg) => console.log("PAGE:", msg.text()));
           page.on("pageerror", (err) => console.log("PAGEERR:", String(err)));
 
-          const url = `file://${process.cwd()}/web/scene.html?w=${w}&h=${h}&text=${encodeURIComponent(text)}`;
+          const url =
+            `file://${process.cwd()}/web/scene.html` +
+            `?w=${w}&h=${h}` +
+            `&text=${encodeURIComponent(text)}` +
+            `&bg=${encodeURIComponent("./background.jpg")}`;
 
           console.log("goto...");
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-          console.log("inject bg + reload...");
-          await page.evaluate((b)=>{ window.__BG__ = b; }, bgDataUrl);
-          await page.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
-
-          await new Promise(r => setTimeout(r, 1500));
+          // Wait until background image loaded and animation loop started
+          await page.waitForFunction(() => window.__READY__ === true, { timeout: 120000 });
+          await new Promise(r => setTimeout(r, 500));
 
           console.log("getStream...");
           const stream = await getStream(page, {
             audio: false,
             video: true,
-            timeout: 120000,
+            timeout: 180000,
             mimeType: "video/webm;codecs=vp8",
             videoBitsPerSecond: 2_500_000,
           });
@@ -299,8 +310,9 @@ jobs:
       - name: Record 60s loop videos (tiktok + youtube) [no frames]
         run: |
           set -euo pipefail
-          xvfb-run -a node scripts/record_60s.mjs tiktok
-          xvfb-run -a node scripts/record_60s.mjs youtube
+          # big virtual screen so both 1080x1920 and 1920x1080 fit
+          xvfb-run -a -s "-screen 0 1920x1920x24" node scripts/record_60s.mjs tiktok
+          xvfb-run -a -s "-screen 0 1920x1920x24" node scripts/record_60s.mjs youtube
 
       - name: Convert loop webm -> loop mp4
         run: |
