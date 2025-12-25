@@ -236,6 +236,87 @@ jobs:
           ffprobe -v error -show_entries format=duration \
             -of default=nw=1:nk=1 work/youtube.mp4
 
+      - name: Get Google access token
+        id: gauth
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TOKEN_JSON="$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            -d client_id="$GDRIVE_CLIENT_ID" \
+            -d client_secret="$GDRIVE_CLIENT_SECRET" \
+            -d refresh_token="$GDRIVE_REFRESH_TOKEN" \
+            -d grant_type=refresh_token)"
+
+          ACCESS_TOKEN="$(echo "$TOKEN_JSON" | jq -r .access_token)"
+          test -n "$ACCESS_TOKEN" && test "$ACCESS_TOKEN" != "null"
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Upload videos to Google Drive
+        id: gdrive
+        env:
+          ACCESS_TOKEN: ${{ steps.gauth.outputs.access_token }}
+          FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          set -euo pipefail
+
+          upload_one () {
+            FILEPATH="$1"
+            OUTKEY="$2"   # output key prefix (tiktok / youtube)
+
+            NAME="$(basename "$FILEPATH")"
+            FILESIZE="$(stat -c%s "$FILEPATH")"
+
+            if [ -n "${FOLDER_ID:-}" ]; then
+              META="$(jq -n --arg name "$NAME" --arg folder "$FOLDER_ID" '{name:$name, parents:[$folder]}')"
+            else
+              META="$(jq -n --arg name "$NAME" '{name:$name}')"
+            fi
+
+            # Create resumable session
+            HEADERS="$(mktemp)"
+            curl -sS -D "$HEADERS" -o /dev/null \
+              -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json; charset=UTF-8" \
+              -d "$META"
+
+            UPLOAD_URL="$(grep -i '^location:' "$HEADERS" | sed -E 's/^location:\s*//I' | tr -d '\r')"
+            rm -f "$HEADERS"
+            test -n "$UPLOAD_URL"
+
+            # Upload bytes
+            RES="$(curl -sS -X PUT "$UPLOAD_URL" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Length: $FILESIZE" \
+              -H "Content-Type: video/mp4" \
+              --upload-file "$FILEPATH")"
+
+            FILE_ID="$(echo "$RES" | jq -r .id)"
+            test -n "$FILE_ID" && test "$FILE_ID" != "null"
+
+            # Make shareable (anyone with link)
+            curl -sS -X POST "https://www.googleapis.com/drive/v3/files/$FILE_ID/permissions" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"type":"anyone","role":"reader","allowFileDiscovery":false}' >/dev/null
+
+            # Fetch links
+            INFO="$(curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files/$FILE_ID?fields=webViewLink,webContentLink")"
+
+            VIEW="$(echo "$INFO" | jq -r .webViewLink)"
+            DL="$(echo "$INFO" | jq -r .webContentLink)"
+
+            echo "${OUTKEY}_view=$VIEW" >> "$GITHUB_OUTPUT"
+            echo "${OUTKEY}_dl=$DL" >> "$GITHUB_OUTPUT"
+          }
+
+          upload_one work/tiktok.mp4 tiktok
+          upload_one work/youtube.mp4 youtube
+
       - name: Upload to Telegram
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
