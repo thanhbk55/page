@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram (Chrome headless record 60s + loop)"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core, record 60s + loop)"
 
 on:
   repository_dispatch:
@@ -22,21 +22,30 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install tools (ffmpeg + chromium)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 chromium-browser
+
+          echo "Chromium path candidates:"
+          which chromium-browser || true
+          which chromium || true
+          chromium-browser --version || true
+          chromium --version || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install npm deps (puppeteer + puppeteer-stream)
+      - name: Install npm deps (puppeteer-core + puppeteer-stream)
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -139,11 +148,12 @@ jobs:
           print(dur)
           PY
 
-      # --- Create the 60s loop video (no frames) ---
-      - name: Create web scene (tiktok + youtube)
+      # --- Create the 60s loop video (NO frames) ---
+      - name: Create web scene + recorder script
         run: |
           set -euo pipefail
           mkdir -p web scripts
+
           cat > web/scene.html <<'HTML'
           <!doctype html>
           <html>
@@ -176,8 +186,7 @@ jobs:
 
               const canvas = document.getElementById("c");
               const ctx = canvas.getContext("2d");
-              function resize(){ canvas.width = W; canvas.height = H; }
-              resize();
+              canvas.width = W; canvas.height = H;
 
               const bg = new Image();
               bg.src = window.__BG__;
@@ -194,7 +203,7 @@ jobs:
               }
 
               const burst = () => {
-                // "fireworks-ish" burst
+                // fireworks-ish burst
                 confetti({
                   particleCount: 120,
                   spread: 120,
@@ -217,7 +226,7 @@ jobs:
 
           cat > scripts/record_60s.mjs <<'JS'
           import fs from "fs";
-          import puppeteer from "puppeteer";
+          import puppeteer from "puppeteer-core";
           import { getStream } from "puppeteer-stream";
 
           const mode = process.argv[2] || "tiktok"; // tiktok|youtube
@@ -228,9 +237,23 @@ jobs:
           const bg = fs.readFileSync("work/background.jpg").toString("base64");
           const bgDataUrl = `data:image/jpeg;base64,${bg}`;
 
+          const execPath =
+            fs.existsSync("/usr/bin/chromium-browser") ? "/usr/bin/chromium-browser" :
+            (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : "");
+
+          if (!execPath) {
+            throw new Error("Chromium executable not found at /usr/bin/chromium-browser or /usr/bin/chromium");
+          }
+
           const browser = await puppeteer.launch({
+            executablePath: execPath,
             headless: "new",
-            args: ["--no-sandbox","--disable-setuid-sandbox","--autoplay-policy=no-user-gesture-required"]
+            args: [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--autoplay-policy=no-user-gesture-required",
+              "--disable-dev-shm-usage"
+            ]
           });
 
           const page = await browser.newPage();
@@ -242,7 +265,7 @@ jobs:
           await page.evaluate((b)=>{ window.__BG__ = b; }, bgDataUrl);
           await page.reload({ waitUntil: "load" });
 
-          // wait a bit to stabilize
+          // stabilize
           await new Promise(r => setTimeout(r, 1000));
 
           const stream = await getStream(page, { audio: false, video: true });
@@ -258,13 +281,6 @@ jobs:
           await browser.close();
           console.log("OK", outPath);
           JS
-
-      - name: Ensure puppeteer deps
-        run: |
-          set -euo pipefail
-          # your package.json must include: puppeteer + puppeteer-stream
-          # e.g. npm i puppeteer puppeteer-stream
-          node -e "require('puppeteer'); require('puppeteer-stream'); console.log('OK puppeteer deps')"
 
       - name: Record 60s loop videos (tiktok + youtube) [no frames]
         run: |
