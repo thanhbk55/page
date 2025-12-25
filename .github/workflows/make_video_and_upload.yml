@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (Chrome headless record 60s + loop)"
 
 on:
   repository_dispatch:
@@ -29,15 +29,14 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 \
-            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install npm deps (canvas + canvas-confetti)
+      - name: Install npm deps (puppeteer + puppeteer-stream)
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -130,55 +129,169 @@ jobs:
             exit 1
           fi
 
-      - name: Compute duration
+      - name: Compute audio duration
         run: |
           set -euo pipefail
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
           python3 - <<PY
-          dur=float("$DUR")
-          dur=max(1.0,dur)
+          dur=float("$DUR"); dur=max(1.0,dur)
           open("work/duration.txt","w").write(str(dur))
           print(dur)
           PY
 
-      - name: Render frames (confetti overlay)
+      # --- Create the 60s loop video (no frames) ---
+      - name: Create web scene (tiktok + youtube)
         run: |
           set -euo pipefail
-          DUR="$(cat work/duration.txt)"
-          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-          if [ ! -f "$FONT" ]; then
-            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
-          fi
+          mkdir -p web scripts
+          cat > web/scene.html <<'HTML'
+          <!doctype html>
+          <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              html,body { margin:0; background:#000; overflow:hidden; }
+              canvas { position:fixed; inset:0; width:100vw; height:100vh; }
+              .overlay{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+              .box{
+                color:#fff; font:700 56px system-ui, -apple-system, "Noto Sans", sans-serif;
+                text-align:center; white-space:pre-wrap; line-height:1.25;
+                background:rgba(0,0,0,.5); padding:36px 46px; border-radius:32px;
+                max-width: 80vw;
+                text-shadow: 0 2px 10px rgba(0,0,0,.7);
+              }
+            </style>
+          </head>
+          <body>
+            <canvas id="c"></canvas>
+            <div class="overlay"><div class="box" id="t"></div></div>
 
-          mkdir -p work/frames_tiktok work/frames_youtube
+            <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+            <script>
+              const params = new URLSearchParams(location.search);
+              const W = Number(params.get("w") || 1080);
+              const H = Number(params.get("h") || 1920);
+              const text = params.get("text") || "";
+              document.getElementById("t").textContent = text;
 
-          node scripts/render_confetti_frames.mjs \
-            --w=1080 --h=1920 --fps=30 --dur="$DUR" \
-            --bg=work/background.jpg \
-            --out=work/frames_tiktok \
-            --text="$(cat work/summary_oneline.txt)" \
-            --font="$FONT"
+              const canvas = document.getElementById("c");
+              const ctx = canvas.getContext("2d");
+              function resize(){ canvas.width = W; canvas.height = H; }
+              resize();
 
-          node scripts/render_confetti_frames.mjs \
-            --w=1920 --h=1080 --fps=30 --dur="$DUR" \
-            --bg=work/background.jpg \
-            --out=work/frames_youtube \
-            --text="$(cat work/summary_oneline.txt)" \
-            --font="$FONT"
+              const bg = new Image();
+              bg.src = window.__BG__;
+              bg.onload = () => requestAnimationFrame(loop);
 
-      - name: Build TikTok mp4 (frames + audio)
+              function drawBg(){
+                const w = canvas.width, h = canvas.height;
+                const scale = Math.max(w/bg.width, h/bg.height);
+                const sw = bg.width * scale, sh = bg.height * scale;
+                const sx = (w - sw)/2, sy = (h - sh)/2;
+                ctx.drawImage(bg, sx, sy, sw, sh);
+                ctx.fillStyle = "rgba(0,0,0,0.22)";
+                ctx.fillRect(0,0,w,h);
+              }
+
+              const burst = () => {
+                // "fireworks-ish" burst
+                confetti({
+                  particleCount: 120,
+                  spread: 120,
+                  startVelocity: 45,
+                  ticks: 220,
+                  origin: { x: Math.random()*0.8 + 0.1, y: Math.random()*0.4 + 0.2 }
+                });
+              };
+
+              let last = 0;
+              function loop(ts){
+                drawBg();
+                if (ts - last > 800) { burst(); last = ts; }
+                requestAnimationFrame(loop);
+              }
+            </script>
+          </body>
+          </html>
+          HTML
+
+          cat > scripts/record_60s.mjs <<'JS'
+          import fs from "fs";
+          import puppeteer from "puppeteer";
+          import { getStream } from "puppeteer-stream";
+
+          const mode = process.argv[2] || "tiktok"; // tiktok|youtube
+          const w = mode === "youtube" ? 1920 : 1080;
+          const h = mode === "youtube" ? 1080 : 1920;
+
+          const text = fs.readFileSync("work/summary_oneline.txt","utf8").trim();
+          const bg = fs.readFileSync("work/background.jpg").toString("base64");
+          const bgDataUrl = `data:image/jpeg;base64,${bg}`;
+
+          const browser = await puppeteer.launch({
+            headless: "new",
+            args: ["--no-sandbox","--disable-setuid-sandbox","--autoplay-policy=no-user-gesture-required"]
+          });
+
+          const page = await browser.newPage();
+          await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+
+          const url = `file://${process.cwd()}/web/scene.html?w=${w}&h=${h}&text=${encodeURIComponent(text)}`;
+          await page.goto(url, { waitUntil: "load" });
+
+          await page.evaluate((b)=>{ window.__BG__ = b; }, bgDataUrl);
+          await page.reload({ waitUntil: "load" });
+
+          // wait a bit to stabilize
+          await new Promise(r => setTimeout(r, 1000));
+
+          const stream = await getStream(page, { audio: false, video: true });
+          const outPath = mode === "youtube" ? "work/loop_youtube.webm" : "work/loop_tiktok.webm";
+          const file = fs.createWriteStream(outPath);
+          stream.pipe(file);
+
+          // record 60s
+          await new Promise(r => setTimeout(r, 60_000));
+
+          stream.destroy();
+          file.close();
+          await browser.close();
+          console.log("OK", outPath);
+          JS
+
+      - name: Ensure puppeteer deps
         run: |
           set -euo pipefail
-          ffmpeg -y -framerate 30 -i work/frames_tiktok/%04d.png -i work/tts.mp3 \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
-            -c:a aac -b:a 192k -shortest work/tiktok.mp4
+          # your package.json must include: puppeteer + puppeteer-stream
+          # e.g. npm i puppeteer puppeteer-stream
+          node -e "require('puppeteer'); require('puppeteer-stream'); console.log('OK puppeteer deps')"
 
-      - name: Build YouTube mp4 (frames + audio)
+      - name: Record 60s loop videos (tiktok + youtube) [no frames]
         run: |
           set -euo pipefail
-          ffmpeg -y -framerate 30 -i work/frames_youtube/%04d.png -i work/tts.mp3 \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
-            -c:a aac -b:a 192k -shortest work/youtube.mp4
+          node scripts/record_60s.mjs tiktok
+          node scripts/record_60s.mjs youtube
+
+      - name: Convert loop webm -> loop mp4
+        run: |
+          set -euo pipefail
+          ffmpeg -y -i work/loop_tiktok.webm \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 work/loop_tiktok.mp4
+          ffmpeg -y -i work/loop_youtube.webm \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 work/loop_youtube.mp4
+
+      # --- Loop 60s video until audio ends ---
+      - name: Loop video to match audio + mux audio (TikTok)
+        run: |
+          set -euo pipefail
+          ffmpeg -y -stream_loop -1 -i work/loop_tiktok.mp4 -i work/tts.mp3 \
+            -c:v copy -c:a aac -b:a 192k -shortest work/tiktok.mp4
+
+      - name: Loop video to match audio + mux audio (YouTube)
+        run: |
+          set -euo pipefail
+          ffmpeg -y -stream_loop -1 -i work/loop_youtube.mp4 -i work/tts.mp3 \
+            -c:v copy -c:a aac -b:a 192k -shortest work/youtube.mp4
 
       - name: Upload to Telegram (caption = date + summary short)
         env:
@@ -207,8 +320,10 @@ jobs:
           name: outputs
           path: |
             work/tts.mp3
+            work/loop_tiktok.webm
+            work/loop_youtube.webm
+            work/loop_tiktok.mp4
+            work/loop_youtube.mp4
             work/tiktok.mp4
             work/youtube.mp4
             work/upload.txt
-            work/frames_tiktok
-            work/frames_youtube
