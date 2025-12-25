@@ -150,13 +150,13 @@ jobs:
 
               /* Mode-driven sizing */
               :root{
-                --fontSize: 34px;
-                --padY: 18px;
-                --padX: 24px;
-                --radius: 20px;
-                --maxW: 72vw;
-                --maxH: 40vh;
-                --clampLines: 4;
+                --fontSize: 40px;
+                --padY: 20px;
+                --padX: 28px;
+                --radius: 22px;
+                --maxW: 78vw;
+                --maxH: 65vh;
+                --clampLines: 10;
               }
 
               .box{
@@ -231,19 +231,19 @@ jobs:
               // Mode-specific typography (both clamp 4 lines)
               const root = document.documentElement;
               if (mode === "youtube") {
-                root.style.setProperty("--fontSize", "30px");
-                root.style.setProperty("--padY", "16px");
-                root.style.setProperty("--padX", "22px");
-                root.style.setProperty("--maxW", "62vw");
-                root.style.setProperty("--maxH", "44vh");
-                root.style.setProperty("--clampLines", "4");
+                root.style.setProperty("--fontSize", "42px");
+                root.style.setProperty("--padY", "20px");
+                root.style.setProperty("--padX", "26px");
+                root.style.setProperty("--maxW", "68vw");
+                root.style.setProperty("--maxH", "55vh");
+                root.style.setProperty("--clampLines", "5");
               } else { // tiktok
-                root.style.setProperty("--fontSize", "34px");
-                root.style.setProperty("--padY", "18px");
-                root.style.setProperty("--padX", "24px");
-                root.style.setProperty("--maxW", "74vw");
-                root.style.setProperty("--maxH", "40vh");
-                root.style.setProperty("--clampLines", "4");
+                root.style.setProperty("--fontSize", "42px");  // to hơn
+                root.style.setProperty("--padY", "22px");
+                root.style.setProperty("--padX", "30px");
+                root.style.setProperty("--maxW", "82vw");
+                root.style.setProperty("--maxH", "68vh");
+                root.style.setProperty("--clampLines", "10");
               }
 
               const canvas = document.getElementById("c");
