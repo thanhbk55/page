@@ -29,6 +29,7 @@
       --clampLines: 10;
 
       --progress: 62%;
+      --fontCJK: "Noto Sans JP","Noto Sans CJK JP","Noto Sans", system-ui, -apple-system, sans-serif;
     }
 
     /* Premium glass card */
@@ -84,7 +85,7 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.10);
       backdrop-filter: blur(10px);
 
-      font: 700 22px system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 700 22px var(--fontCJK);
       color: rgba(0,0,0,0.78);
       letter-spacing: .3px;
       opacity: 0.92;
@@ -167,7 +168,7 @@
     .badge{ animation: badgePulse 3.6s ease-in-out infinite; }
 
     .headline{
-      font: 650 var(--headlineSize) system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 650 var(--headlineSize) var(--fontCJK);
       letter-spacing: 0.2px;
       color:#111;
       margin-bottom: 18px;
@@ -178,7 +179,7 @@
     .content{
       width: 100%;
       color:#111;
-      font: 750 var(--textSize) system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 750 var(--textSize) var(--fontCJK);
       text-align:center;
       line-height:1.34;
 
@@ -201,12 +202,12 @@
     }
 
     .player .meta .title{
-      font: 850 52px system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 850 52px var(--fontCJK);
       letter-spacing: .2px;
     }
     .player .meta .sub{
       margin-top: 10px;
-      font: 750 38px system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 750 38px var(--fontCJK);
       color: rgba(0,0,0,0.55);
     }
 
@@ -268,7 +269,7 @@
       display:flex;
       align-items:center;
       justify-content:center;
-      font: 800 34px system-ui, -apple-system, "Noto Sans", sans-serif;
+      font: 800 34px var(--fontCJK);
       color:#111;
       background: rgba(0,0,0,0.06);
       box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
