@@ -3,6 +3,7 @@
   "private": true,
   "dependencies": {
     "puppeteer-core": "^23.0.0",
-    "puppeteer-stream": "^3.0.0"
+    "puppeteer-stream": "^3.0.0",
+    "canvas-confetti": "^1.9.3"
   }
 }
