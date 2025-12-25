@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core + puppeteer-stream extension, record 60s + loop)"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core + xvfb, record 60s + loop)"
 
 on:
   repository_dispatch:
@@ -29,10 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install tools (ffmpeg + chromium)
+      - name: Install tools (ffmpeg + chromium + xvfb)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 chromium-browser
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 chromium-browser xvfb
           which chromium-browser || true
           which chromium || true
           chromium-browser --version || true
@@ -136,12 +136,12 @@ jobs:
             exit 1
           fi
 
-      - name: Create web scene + recorder script (LOCAL confetti + load puppeteer-stream extension)
+      - name: Create web scene + recorder script (local confetti, no CDN)
         run: |
           set -euo pipefail
           mkdir -p web scripts
 
-          # local confetti bundle (no CDN)
+          # local confetti bundle (no CDN/network)
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
 
           cat > web/scene.html <<'HTML'
@@ -149,6 +149,7 @@ jobs:
           <html>
           <head>
             <meta charset="utf-8" />
+            <link rel="icon" href="data:,">
             <style>
               html,body { margin:0; background:#000; overflow:hidden; }
               canvas { position:fixed; inset:0; width:100vw; height:100vh; }
@@ -165,6 +166,7 @@ jobs:
           <body>
             <canvas id="c"></canvas>
             <div class="overlay"><div class="box" id="t"></div></div>
+
             <script src="./confetti.js"></script>
             <script>
               const params = new URLSearchParams(location.search);
@@ -229,21 +231,21 @@ jobs:
             (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : "");
           if (!execPath) throw new Error("Chromium executable not found");
 
-          // IMPORTANT: load puppeteer-stream extension
           const extPath = path.resolve("node_modules/puppeteer-stream/extension");
-          if (!fs.existsSync(extPath)) {
-            throw new Error(`puppeteer-stream extension folder not found: ${extPath}`);
-          }
+          if (!fs.existsSync(extPath)) throw new Error(`extension not found: ${extPath}`);
 
+          // IMPORTANT:
+          // - run headful (extensions are unreliable in headless)
+          // - workflow step uses xvfb-run
           const browser = await puppeteer.launch({
             executablePath: execPath,
-            headless: "new",
-            ignoreDefaultArgs: ["--disable-extensions"], // must allow extensions
+            headless: false,
+            ignoreDefaultArgs: ["--disable-extensions"],
             args: [
               "--no-sandbox",
               "--disable-setuid-sandbox",
-              "--autoplay-policy=no-user-gesture-required",
               "--disable-dev-shm-usage",
+              `--window-size=${w},${h}`,
               `--disable-extensions-except=${extPath}`,
               `--load-extension=${extPath}`,
             ],
@@ -266,15 +268,15 @@ jobs:
           await page.evaluate((b)=>{ window.__BG__ = b; }, bgDataUrl);
           await page.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
 
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 1500));
 
           console.log("getStream...");
           const stream = await getStream(page, {
             audio: false,
             video: true,
+            timeout: 120000,
             mimeType: "video/webm;codecs=vp8",
             videoBitsPerSecond: 2_500_000,
-            frameSize: 20,
           });
 
           const outPath = mode === "youtube" ? "work/loop_youtube.webm" : "work/loop_tiktok.webm";
@@ -289,7 +291,6 @@ jobs:
           file.close();
 
           await browser.close();
-          // puppeteer-stream uses a websocket server; close it to avoid hanging
           (await wss).close();
 
           console.log("OK", outPath);
@@ -298,8 +299,8 @@ jobs:
       - name: Record 60s loop videos (tiktok + youtube) [no frames]
         run: |
           set -euo pipefail
-          node scripts/record_60s.mjs tiktok
-          node scripts/record_60s.mjs youtube
+          xvfb-run -a node scripts/record_60s.mjs tiktok
+          xvfb-run -a node scripts/record_60s.mjs youtube
 
       - name: Convert loop webm -> loop mp4
         run: |
