@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core + xvfb + ffmpeg x11grab)"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (xvfb + chromium --app + ffmpeg x11grab)"
 
 on:
   repository_dispatch:
@@ -22,8 +22,6 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    env:
-      PUPPETEER_SKIP_DOWNLOAD: "true"
 
     steps:
       - name: Checkout
@@ -42,7 +40,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install npm deps (puppeteer-core + canvas-confetti)
+      - name: Install npm deps (canvas-confetti)
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -80,19 +78,20 @@ jobs:
           print("OK")
           PY
 
-      - name: Prepare title + upload.txt
+      - name: Prepare title + upload.txt + encoded text
         id: prep
         run: |
           set -euo pipefail
           export TZ=Asia/Tokyo
           DATE="$(date +%Y-%m-%d)"
           python3 - <<'PY'
-          import re
+          import re, urllib.parse
           s=open("work/summary.txt","r",encoding="utf-8").read().strip()
           s=re.sub(r"\s+"," ",s)
           short = (s[:60] + "…") if len(s) > 60 else s
           open("work/summary_oneline.txt","w",encoding="utf-8").write(s+"\n")
           open("work/summary_short.txt","w",encoding="utf-8").write(short+"\n")
+          open("work/summary_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(s)+"\n")
           PY
           SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
           SHORT="$(cat work/summary_short.txt)"
@@ -125,10 +124,10 @@ jobs:
             --output work/tts.mp3
           test -s work/tts.mp3
 
-      - name: Create web scene + puppeteer opener (app/kiosk mode)
+      - name: Create web scene (local confetti, local bg)
         run: |
           set -euo pipefail
-          mkdir -p web scripts
+          mkdir -p web
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
           cp work/background.jpg web/background.jpg
 
@@ -160,9 +159,7 @@ jobs:
               const params = new URLSearchParams(location.search);
               const W = Number(params.get("w") || 1080);
               const H = Number(params.get("h") || 1920);
-              const text = params.get("text") || "";
-              const bgParam = params.get("bg") || "./background.jpg";
-
+              const text = decodeURIComponent(params.get("text") || "");
               document.getElementById("t").textContent = text;
 
               const canvas = document.getElementById("c");
@@ -170,7 +167,7 @@ jobs:
               canvas.width = W; canvas.height = H;
 
               const bg = new Image();
-              bg.src = new URL(bgParam, location.href).href;
+              bg.src = new URL("./background.jpg", location.href).href;
 
               bg.onload = () => {
                 window.__READY__ = true;
@@ -206,63 +203,20 @@ jobs:
           </html>
           HTML
 
-          cat > scripts/open_scene.mjs <<'JS'
-          import fs from "fs";
-          import puppeteer from "puppeteer-core";
-
-          const mode = process.argv[2] || "tiktok";
-          const w = mode === "youtube" ? 1920 : 1080;
-          const h = mode === "youtube" ? 1080 : 1920;
-          const text = fs.readFileSync("work/summary_oneline.txt","utf8").trim();
-
-          const execPath =
-            fs.existsSync("/usr/bin/chromium-browser") ? "/usr/bin/chromium-browser" :
-            (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : "");
-          if (!execPath) throw new Error("Chromium executable not found");
-
-          const url =
-            `file://${process.cwd()}/web/scene.html` +
-            `?w=${w}&h=${h}` +
-            `&text=${encodeURIComponent(text)}` +
-            `&bg=${encodeURIComponent("./background.jpg")}`;
-
-          const browser = await puppeteer.launch({
-            executablePath: execPath,
-            headless: false,
-            args: [
-              "--no-sandbox",
-              "--disable-setuid-sandbox",
-              "--disable-dev-shm-usage",
-              "--disable-gpu",
-              "--autoplay-policy=no-user-gesture-required",
-
-              // key: app/kiosk removes tabs/address bar
-              `--app=${url}`,
-              "--kiosk",
-              "--no-first-run",
-              "--no-default-browser-check",
-
-              // force exact size/position so x11grab is clean
-              `--window-size=${w},${h}`,
-              "--window-position=0,0",
-            ],
-          });
-
-          const page = (await browser.pages())[0] || await browser.newPage();
-          page.setDefaultTimeout(120000);
-
-          // in app mode, the page is already navigated to url
-          await page.waitForFunction(() => window.__READY__ === true, { timeout: 120000 });
-
-          const keepMs = Number(process.env.KEEP_MS || "20000");
-          await new Promise(r => setTimeout(r, keepMs));
-
-          await browser.close();
-          JS
-
-      - name: Record loop videos via ffmpeg x11grab (no browser UI)
+      - name: Record loop videos via chromium --app (chromeless) + ffmpeg x11grab
         run: |
           set -euo pipefail
+
+          make_url () {
+            MODE="$1"
+            if [ "$MODE" = "youtube" ]; then
+              W=1920; H=1080
+            else
+              W=1080; H=1920
+            fi
+            TEXT_ENC="$(cat work/summary_encoded.txt)"
+            echo "file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&text=${TEXT_ENC}"
+          }
 
           record_one () {
             MODE="$1"
@@ -276,18 +230,45 @@ jobs:
 
             xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc "
               set -euo pipefail
-              export KEEP_MS=25000
-              node scripts/open_scene.mjs $MODE &
-              NP=\$!
+              URL=\$(python3 - <<PY
+import os
+mode='$MODE'
+w,h=(1920,1080) if mode=='youtube' else (1080,1920)
+text=open('work/summary_encoded.txt','r',encoding='utf-8').read().strip()
+print(f'file://{os.environ['GITHUB_WORKSPACE']}/web/scene.html?w={w}&h={h}&text={text}')
+PY
+)
+              echo \"URL=\$URL\"
+
+              # Start chromium in app/kiosk mode -> no tab bar, no address bar
+              chromium-browser \
+                --no-sandbox \
+                --disable-setuid-sandbox \
+                --disable-dev-shm-usage \
+                --disable-gpu \
+                --no-first-run \
+                --no-default-browser-check \
+                --disable-infobars \
+                --app=\"\$URL\" \
+                --kiosk \
+                --window-position=0,0 \
+                --window-size=${W},${H} \
+                --user-data-dir=/tmp/chrome-${MODE}-$$ \
+                >/dev/null 2>&1 &
+
+              CP=\$!
               sleep 2
 
+              # Record 10s only (small loop clip)
               ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i \$DISPLAY+0,0 \
                 -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \"$OUT\"
 
-              kill \$NP || true
-              wait \$NP || true
+              kill \$CP || true
+              wait \$CP || true
             "
+
             test -s "$OUT"
+            echo "OK: $OUT"
           }
 
           record_one tiktok
