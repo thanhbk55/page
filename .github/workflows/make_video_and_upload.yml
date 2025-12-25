@@ -144,8 +144,11 @@ jobs:
 
               .overlay{
                 position:fixed; inset:0;
-                display:flex; align-items:center; justify-content:center;
+                display:flex;
+                align-items:flex-start;
+                justify-content:center;
                 pointer-events:none;
+                padding-top: 220px;
               }
 
               :root{
@@ -219,14 +222,18 @@ jobs:
               /* ---- Visualizer (wave + bars) ---- */
               .viz{
                 position: fixed;
-                left: 28px;
-                bottom: 42px;
-                width: 360px;
-                height: 120px;
-                border-radius: 18px;
+                left: 50%;
+                transform: translateX(-50%);
+                bottom: 36px;
+              
+                width: 520px;        /* sẽ override bằng JS theo mode */
+                height: 140px;       /* to hơn */
+                border-radius: 22px;
                 overflow: hidden;
-                opacity: 0.75;
+              
+                opacity: 0.78;
                 pointer-events: none;
+              
                 background: linear-gradient(
                   180deg,
                   rgba(120,180,170,.55),
@@ -250,13 +257,13 @@ jobs:
 
               .viz-bars{
                 position:absolute;
-                left: 18px;
-                right: 18px;
-                bottom: 14px;
-                height: 86px;
+                left: 22px;
+                right: 22px;
+                bottom: 16px;
+                height: 105px;
                 display:flex;
                 align-items:flex-end;
-                gap: 8px;
+                gap: 10px;
               }
               .viz-bars span{
                 width: 10px;
@@ -295,6 +302,7 @@ jobs:
 
               // Mode-specific typography: TikTok 10 lines, YouTube 5 lines
               const root = document.documentElement;
+              const viz = document.getElementById("viz");
               if (mode === "youtube") {
                 root.style.setProperty("--fontSize", "38px");
                 root.style.setProperty("--padY", "20px");
@@ -302,6 +310,9 @@ jobs:
                 root.style.setProperty("--maxW", "68vw");
                 root.style.setProperty("--maxH", "55vh");
                 root.style.setProperty("--clampLines", "5");
+                viz.style.width = "720px";
+                viz.style.height = "150px";
+                viz.style.bottom = "40px";
               } else {
                 root.style.setProperty("--fontSize", "44px");
                 root.style.setProperty("--padY", "22px");
@@ -309,6 +320,10 @@ jobs:
                 root.style.setProperty("--maxW", "82vw");
                 root.style.setProperty("--maxH", "68vh");
                 root.style.setProperty("--clampLines", "10");
+                viz.style.width = "92vw";
+                viz.style.maxWidth = "980px";
+                viz.style.height = "160px";
+                viz.style.bottom = "36px";
               }
 
               const canvas = document.getElementById("c");
