@@ -13,7 +13,7 @@
       position:fixed; inset:0;
       display:flex; align-items:center; justify-content:center;
       pointer-events:none;
-      padding: 0 6vw;
+      padding: 6vh 6vw;
     }
 
     /* Mode-driven sizing */
@@ -172,6 +172,7 @@
       color:#111;
       margin-bottom: 18px;
       opacity: 0.94;
+      margin-top: 34px;
     }
 
     .content{
@@ -418,7 +419,6 @@
       root.style.setProperty("--textSize", "40px");
       root.style.setProperty("--pad", "42px");
       root.style.setProperty("--clampLines", "5");
-      overlay.style.marginTop = "3vh"; 
     } else { // tiktok
       root.style.setProperty("--cardW", "84vw");
       root.style.setProperty("--cardH", "72vh");
@@ -426,7 +426,6 @@
       root.style.setProperty("--textSize", "44px");
       root.style.setProperty("--pad", "46px");
       root.style.setProperty("--clampLines", "10");
-      overlay.style.marginTop = "6vh";
     }
 
     const canvas = document.getElementById("c");
