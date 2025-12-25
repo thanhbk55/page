@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core + xvfb, record 60s + loop)"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core + xvfb + ffmpeg x11grab)"
 
 on:
   repository_dispatch:
@@ -37,13 +37,14 @@ jobs:
           which chromium || true
           chromium-browser --version || true
           chromium --version || true
+          ffmpeg -version | head -n 2
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install npm deps (puppeteer-core + puppeteer-stream + canvas-confetti)
+      - name: Install npm deps (puppeteer-core + canvas-confetti)
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -136,15 +137,12 @@ jobs:
             exit 1
           fi
 
-      - name: Create web scene + recorder script (local confetti, no CDN)
+      - name: Create web scene + puppeteer opener (no puppeteer-stream)
         run: |
           set -euo pipefail
           mkdir -p web scripts
 
-          # local confetti bundle (no CDN/network)
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
-
-          # copy background into web/ to avoid reload+window injection issues
           cp work/background.jpg web/background.jpg
 
           cat > web/scene.html <<'HTML'
@@ -221,11 +219,9 @@ jobs:
           </html>
           HTML
 
-          cat > scripts/record_60s.mjs <<'JS'
+          cat > scripts/open_scene.mjs <<'JS'
           import fs from "fs";
-          import path from "path";
           import puppeteer from "puppeteer-core";
-          import { getStream, wss } from "puppeteer-stream";
 
           const mode = process.argv[2] || "tiktok"; // tiktok|youtube
           const w = mode === "youtube" ? 1920 : 1080;
@@ -238,16 +234,9 @@ jobs:
             (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : "");
           if (!execPath) throw new Error("Chromium executable not found");
 
-          const extPath = path.resolve("node_modules/puppeteer-stream/extension");
-          if (!fs.existsSync(extPath)) throw new Error(`extension not found: ${extPath}`);
-
-          // IMPORTANT:
-          // - run headful (extensions are unreliable in headless)
-          // - workflow step uses xvfb-run
           const browser = await puppeteer.launch({
             executablePath: execPath,
             headless: false,
-            ignoreDefaultArgs: ["--disable-extensions"],
             args: [
               "--no-sandbox",
               "--disable-setuid-sandbox",
@@ -255,8 +244,7 @@ jobs:
               "--disable-gpu",
               "--autoplay-policy=no-user-gesture-required",
               `--window-size=${w},${h}`,
-              `--disable-extensions-except=${extPath}`,
-              `--load-extension=${extPath}`,
+              "--window-position=0,0",
             ],
           });
 
@@ -277,50 +265,54 @@ jobs:
           console.log("goto...");
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-          // Wait until background image loaded and animation loop started
+          // Wait until bg loaded & loop started
           await page.waitForFunction(() => window.__READY__ === true, { timeout: 120000 });
-          await new Promise(r => setTimeout(r, 500));
+          console.log("READY");
 
-          console.log("getStream...");
-          const stream = await getStream(page, {
-            audio: false,
-            video: true,
-            timeout: 180000,
-            mimeType: "video/webm;codecs=vp8",
-            videoBitsPerSecond: 2_500_000,
-          });
-
-          const outPath = mode === "youtube" ? "work/loop_youtube.webm" : "work/loop_tiktok.webm";
-          const file = fs.createWriteStream(outPath);
-          stream.pipe(file);
-
-          console.log("recording 60s...");
-          await new Promise(r => setTimeout(r, 60_000));
-
-          console.log("stop...");
-          await stream.destroy();
-          file.close();
+          // Keep it alive while ffmpeg records
+          const keepMs = Number(process.env.KEEP_MS || "65000");
+          await new Promise(r => setTimeout(r, keepMs));
 
           await browser.close();
-          (await wss).close();
-
-          console.log("OK", outPath);
           JS
 
-      - name: Record 60s loop videos (tiktok + youtube) [no frames]
+      - name: Record 60s loop videos (tiktok + youtube) via ffmpeg x11grab
         run: |
           set -euo pipefail
-          # big virtual screen so both 1080x1920 and 1920x1080 fit
-          xvfb-run -a -s "-screen 0 1920x1920x24" node scripts/record_60s.mjs tiktok
-          xvfb-run -a -s "-screen 0 1920x1920x24" node scripts/record_60s.mjs youtube
 
-      - name: Convert loop webm -> loop mp4
-        run: |
-          set -euo pipefail
-          ffmpeg -y -i work/loop_tiktok.webm \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 work/loop_tiktok.mp4
-          ffmpeg -y -i work/loop_youtube.webm \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 work/loop_youtube.mp4
+          record_one () {
+            MODE="$1"
+            if [ "$MODE" = "youtube" ]; then
+              W=1920; H=1080
+              OUT="work/loop_youtube.mp4"
+            else
+              W=1080; H=1920
+              OUT="work/loop_tiktok.mp4"
+            fi
+
+            # Xvfb in one shell so DISPLAY is shared by node + ffmpeg
+            xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc "
+              set -euo pipefail
+              export KEEP_MS=70000
+              node scripts/open_scene.mjs $MODE &
+              NP=\$!
+              sleep 2
+
+              echo \"DISPLAY=\$DISPLAY\"
+              # Record top-left region exactly W x H at 30fps for 60s
+              ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i \$DISPLAY+0,0 \
+                -t 60 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \"$OUT\"
+
+              kill \$NP || true
+              wait \$NP || true
+            "
+
+            test -s "$OUT"
+            echo "OK: $OUT"
+          }
+
+          record_one tiktok
+          record_one youtube
 
       - name: Loop video to match audio + mux audio (TikTok)
         run: |
@@ -361,8 +353,6 @@ jobs:
           name: outputs
           path: |
             work/tts.mp3
-            work/loop_tiktok.webm
-            work/loop_youtube.webm
             work/loop_tiktok.mp4
             work/loop_youtube.mp4
             work/tiktok.mp4
