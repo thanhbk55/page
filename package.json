@@ -2,6 +2,8 @@
   "type": "module",
   "dependencies": {
     "canvas": "^2.11.2",
-    "canvas-confetti": "^1.9.3"
+    "canvas-confetti": "^1.9.3",
+    "puppeteer": "^23.0.0",
+    "puppeteer-stream": "^3.0.0"
   }
 }
