@@ -1,0 +1,432 @@
+<!doctype html>
+<html translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="google" content="notranslate">
+  <link rel="icon" href="data:,">
+  <style>
+    html,body { margin:0; background:#000; overflow:hidden; }
+    canvas { position:fixed; inset:0; width:100vw; height:100vh; }
+
+    .overlay{
+      position:fixed; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      pointer-events:none;
+      padding: 6vh 6vw;
+    }
+
+    /* Mode-driven sizing */
+    :root{
+      --cardW: 84vw;
+      --cardH: 72vh;
+      --radius: 40px;
+
+      --headlineSize: 64px;
+      --textSize: 44px;
+      --pad: 46px;
+
+      --clampLines: 10;
+    }
+
+    .card{
+      position: relative;
+      width: var(--cardW);
+      max-width: 920px;
+
+      height: var(--cardH);
+      max-height: 1400px;
+
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.92);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+      backdrop-filter: blur(6px);
+
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+
+      padding: var(--pad);
+      overflow:hidden;
+    }
+
+    .badge{
+      position:absolute;
+      top: 26px;
+      right: 26px;
+
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+
+      background:#d63b35;
+      color:#fff;
+      font-size: 44px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .headline{
+      font: 500 var(--headlineSize) system-ui, -apple-system, "Noto Sans", sans-serif;
+      letter-spacing: 0.2px;
+      color:#111;
+      margin-bottom: 22px;
+      opacity: 0.95;
+    }
+
+    .content{
+      width: 100%;
+      color:#111;
+      font: 650 var(--textSize) system-ui, -apple-system, "Noto Sans", sans-serif;
+      text-align:center;
+      line-height:1.35;
+
+      display:-webkit-box;
+      -webkit-line-clamp: var(--clampLines);
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+
+      will-change: transform, filter, opacity;
+    }
+
+    /* Fake audio player UI */
+    .player{
+      width: 100%;
+      margin-top: 34px;
+      padding-top: 26px;
+      border-top: 2px solid rgba(0,0,0,0.08);
+      color:#111;
+    }
+
+    .player .meta .title{
+      font: 800 52px system-ui, -apple-system, "Noto Sans", sans-serif;
+      letter-spacing: .2px;
+    }
+    .player .meta .sub{
+      margin-top: 10px;
+      font: 700 38px system-ui, -apple-system, "Noto Sans", sans-serif;
+      color: rgba(0,0,0,0.55);
+    }
+
+    .progress{
+      margin-top: 22px;
+      display:flex;
+      align-items:center;
+      gap: 18px;
+    }
+
+    .time{
+      font: 600 28px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(0,0,0,0.6);
+      min-width: 92px;
+      text-align:center;
+    }
+
+    .bar{
+      position: relative;
+      flex: 1;
+      height: 6px;
+      background: rgba(0,0,0,0.15);
+      border-radius: 999px;
+    }
+
+    .bar::before{
+      content:"";
+      position:absolute;
+      left:0; top:0; bottom:0;
+      width: var(--progress, 68%);
+      background: rgba(0,0,0,0.65);
+      border-radius: 999px;
+    }
+
+    .dot{
+      position:absolute;
+      left: var(--progress, 68%);
+      top: 50%;
+      transform: translate(-50%,-50%);
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.85);
+    }
+
+    .controls{
+      margin-top: 26px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 20px;
+    }
+
+    .btn{
+      width: 88px;
+      height: 88px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font: 800 34px system-ui, -apple-system, "Noto Sans", sans-serif;
+      color:#111;
+      background: rgba(0,0,0,0.06);
+    }
+
+    .btn.big{
+      width: 108px;
+      height: 108px;
+      font-size: 44px;
+      background: rgba(0,0,0,0.10);
+    }
+
+    /* Random text animations (apply to .content) */
+    @keyframes popIn {
+      0% { transform: scale(.96); opacity:0; filter: blur(2px); }
+      100% { transform: scale(1); opacity:1; filter: blur(0); }
+    }
+    @keyframes floaty {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+      100% { transform: translateY(0); }
+    }
+    @keyframes wobble {
+      0% { transform: rotate(0deg) scale(1); }
+      25% { transform: rotate(-1.2deg) scale(1.01); }
+      50% { transform: rotate(1.2deg) scale(1.01); }
+      75% { transform: rotate(-0.8deg) scale(1.005); }
+      100% { transform: rotate(0deg) scale(1); }
+    }
+    @keyframes shimmer {
+      0% { filter: brightness(1); }
+      50% { filter: brightness(1.10); }
+      100% { filter: brightness(1); }
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+
+    .anim-pop { animation: popIn 700ms ease-out both; }
+    .anim-float { animation: popIn 700ms ease-out both, floaty 2600ms ease-in-out infinite; }
+    .anim-wobble { animation: popIn 700ms ease-out both, wobble 3200ms ease-in-out infinite; }
+    .anim-shimmer { animation: popIn 700ms ease-out both, shimmer 2400ms ease-in-out infinite; }
+    .anim-pulse { animation: popIn 700ms ease-out both, pulse 2200ms ease-in-out infinite; }
+  </style>
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="overlay">
+    <div class="card">
+      <div class="badge" aria-hidden="true">♥</div>
+      <div class="headline">Listen Now</div>
+
+      <!-- Fallback text: nếu URL không có ?text=... thì vẫn hiện -->
+      <div class="content" id="t">Nội dung hiển thị ở đây…</div>
+
+      <div class="player" aria-hidden="true">
+        <div class="meta">
+          <div class="title">Favorite Podcast</div>
+          <div class="sub">Eps.01 Mental Health</div>
+        </div>
+
+        <div class="progress">
+          <div class="time">13:10</div>
+          <div class="bar"><div class="dot"></div></div>
+          <div class="time">-09:21</div>
+        </div>
+
+        <div class="controls">
+          <div class="btn">⟲</div>
+          <div class="btn">⏮</div>
+          <div class="btn big">⏸</div>
+          <div class="btn">⏭</div>
+          <div class="btn">⇄</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./confetti.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const mode = (params.get("mode") || "tiktok").toLowerCase(); // tiktok|youtube
+    const W = Number(params.get("w") || 1080);
+    const H = Number(params.get("h") || 1920);
+
+    // Mode-specific typography & card size
+    const root = document.documentElement;
+    if (mode === "youtube") {
+      root.style.setProperty("--cardW", "68vw");
+      root.style.setProperty("--cardH", "64vh");
+      root.style.setProperty("--headlineSize", "58px");
+      root.style.setProperty("--textSize", "40px");
+      root.style.setProperty("--pad", "42px");
+      root.style.setProperty("--clampLines", "8");
+    } else { // tiktok
+      root.style.setProperty("--cardW", "84vw");
+      root.style.setProperty("--cardH", "72vh");
+      root.style.setProperty("--headlineSize", "64px");
+      root.style.setProperty("--textSize", "44px");
+      root.style.setProperty("--pad", "46px");
+      root.style.setProperty("--clampLines", "10");
+    }
+
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    canvas.width = W; canvas.height = H;
+
+    // --- TEXT: robust fallback (không có ?text= thì giữ nội dung trong HTML)
+    const tEl = document.getElementById("t");
+    const paramText = params.get("text");
+    const text = paramText ? decodeURIComponent(paramText) : (tEl.textContent || "").trim();
+    tEl.textContent = text;
+
+    // Random text animation (changes every few seconds)
+    const textAnims = ["anim-pop","anim-float","anim-wobble","anim-shimmer","anim-pulse"];
+    function applyRandomTextAnim() {
+      for (const a of textAnims) tEl.classList.remove(a);
+      const pick = textAnims[Math.floor(Math.random() * textAnims.length)];
+      tEl.classList.add(pick);
+    }
+    applyRandomTextAnim();
+    setInterval(applyRandomTextAnim, 4500);
+
+    // Optional: fake progress variation if wanted
+    // root.style.setProperty("--progress", (40 + Math.floor(Math.random()*40)) + "%");
+
+    // Load background
+    const bg = new Image();
+    bg.src = new URL("./background.jpg", location.href).href;
+
+    function drawBg(){
+      const w = canvas.width, h = canvas.height;
+      const scale = Math.max(w/bg.width, h/bg.height);
+      const sw = bg.width * scale, sh = bg.height * scale;
+      const sx = (w - sw)/2, sy = (h - sh)/2;
+      ctx.drawImage(bg, sx, sy, sw, sh);
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.fillRect(0,0,w,h);
+    }
+
+    // Confetti helpers
+    const rand = (a,b)=> Math.random()*(b-a)+a;
+    const pickOne = (arr)=> arr[Math.floor(Math.random()*arr.length)];
+
+    const emojiList = ["✨","🎉","💖","🔥","🌸","🍀","⭐","💯","🥳","🎊","🌟","🎈","🍋","🫶","😺","🦊","🐣"];
+    const canShapeFromText = typeof confetti.shapeFromText === "function";
+    const canShapeFromPath = typeof confetti.shapeFromPath === "function";
+
+    const emojiShapes = canShapeFromText
+      ? emojiList.map(e => confetti.shapeFromText({ text: e, scalar: 1.2 }))
+      : null;
+
+    const customShapes = canShapeFromPath ? ([
+      confetti.shapeFromPath({ path: "M0 30 L15 0 L30 30 L15 22 Z" }),
+      confetti.shapeFromPath({ path: "M15 0 C23 0 30 7 30 15 C30 23 23 30 15 30 C7 30 0 23 0 15 C0 7 7 0 15 0 Z" }),
+      confetti.shapeFromPath({ path: "M15 0 L19 10 L30 10 L21 17 L24 30 L15 22 L6 30 L9 17 L0 10 L11 10 Z" }),
+      confetti.shapeFromPath({ path: "M0 15 L15 0 L30 15 L15 30 Z" }),
+    ]) : null;
+
+    function burst(opts){
+      confetti({
+        particleCount: opts.particleCount ?? 120,
+        spread: opts.spread ?? 100,
+        startVelocity: opts.startVelocity ?? 45,
+        ticks: opts.ticks ?? 220,
+        gravity: opts.gravity ?? 0.9,
+        scalar: opts.scalar ?? 1,
+        drift: opts.drift ?? 0,
+        origin: opts.origin ?? { x: 0.5, y: 0.7 },
+        angle: opts.angle,
+        shapes: opts.shapes,
+      });
+    }
+
+    function presetBasicCannon(){
+      burst({ particleCount: 140, spread: 70, startVelocity: 55, origin: { x: 0.5, y: 0.95 } });
+    }
+    function presetRandomDirection(){
+      const angle = rand(0, 360);
+      burst({ particleCount: 120, spread: 140, startVelocity: 35, angle, origin: { x: rand(0.15, 0.85), y: rand(0.2, 0.8) } });
+    }
+    function presetRealisticLook(){
+      burst({
+        particleCount: 160,
+        spread: 90,
+        startVelocity: 45,
+        gravity: 1.2,
+        scalar: rand(0.8, 1.15),
+        drift: rand(-0.6, 0.6),
+        ticks: 280,
+        origin: { x: rand(0.2, 0.8), y: rand(0.2, 0.6) }
+      });
+    }
+    function presetFireworks(){
+      const times = 3;
+      for (let i=0;i<times;i++){
+        setTimeout(() => {
+          burst({
+            particleCount: 120,
+            spread: 360,
+            startVelocity: 28,
+            gravity: 0.9,
+            ticks: 260,
+            origin: { x: rand(0.15, 0.85), y: rand(0.15, 0.45) }
+          });
+        }, i * 220);
+      }
+    }
+    function presetStars(){
+      const shapes = (customShapes && customShapes[2]) ? [customShapes[2]] : undefined;
+      burst({ particleCount: 120, spread: 110, startVelocity: 38, ticks: 260, scalar: 1.1, gravity: 0.95, shapes, origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) } });
+    }
+    function presetSnow(){
+      burst({ particleCount: 220, spread: 40, startVelocity: 10, gravity: 0.7, ticks: 380, scalar: 0.7, drift: rand(-0.3, 0.3), origin: { x: rand(0.1, 0.9), y: 0.05 }, angle: 90 });
+    }
+    function presetSchoolPride(){
+      burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.1, y: 0.95 }, angle: 60 });
+      burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.9, y: 0.95 }, angle: 120 });
+    }
+    function presetCustomShapes(){
+      if (customShapes) burst({ particleCount: 140, spread: 120, startVelocity: 42, ticks: 260, scalar: rand(0.9, 1.2), shapes: [pickOne(customShapes)], origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.6) } });
+      else presetRealisticLook();
+    }
+    function presetEmoji(){
+      if (emojiShapes) burst({ particleCount: 90, spread: 120, startVelocity: 38, ticks: 280, gravity: 1.0, scalar: rand(0.9, 1.2), shapes: [pickOne(emojiShapes)], origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) } });
+      else presetBasicCannon();
+    }
+
+    const presets = [
+      presetBasicCannon,
+      presetRandomDirection,
+      presetRealisticLook,
+      presetFireworks,
+      presetStars,
+      presetSnow,
+      presetSchoolPride,
+      presetCustomShapes,
+      presetEmoji,
+    ];
+
+    let last = 0;
+    function loop(ts){
+      drawBg();
+      if (ts - last > 900) {
+        pickOne(presets)();
+        last = ts;
+      }
+      requestAnimationFrame(loop);
+    }
+
+    bg.onload = () => {
+      window.__READY__ = true;
+      requestAnimationFrame(loop);
+    };
+  </script>
+</body>
+</html>
