@@ -124,7 +124,7 @@ jobs:
             --output work/tts.mp3
           test -s work/tts.mp3
 
-      - name: Create web scene (text effects + random confetti presets)
+      - name: Create web scene (text auto-hide + random confetti + visualizer wave/bars)
         run: |
           set -euo pipefail
           mkdir -p web
@@ -148,14 +148,13 @@ jobs:
                 pointer-events:none;
               }
 
-              /* Mode-driven sizing */
               :root{
-                --fontSize: 40px;
-                --padY: 20px;
-                --padX: 28px;
+                --fontSize: 44px;
+                --padY: 22px;
+                --padX: 30px;
                 --radius: 22px;
-                --maxW: 78vw;
-                --maxH: 65vh;
+                --maxW: 82vw;
+                --maxH: 68vh;
                 --clampLines: 10;
               }
 
@@ -163,7 +162,7 @@ jobs:
                 color:#fff;
                 font:600 var(--fontSize) system-ui, -apple-system, "Noto Sans", sans-serif;
                 text-align:center;
-                line-height:1.35;
+                line-height:1.45;
 
                 background:rgba(0,0,0,.45);
                 padding: var(--padY) var(--padX);
@@ -179,6 +178,8 @@ jobs:
                 text-shadow: 0 2px 10px rgba(0,0,0,.7);
                 transform: translateZ(0);
                 will-change: transform, filter, opacity;
+                opacity: 1;
+                transition: opacity 900ms ease, transform 900ms ease, filter 900ms ease;
               }
 
               /* Random text animations */
@@ -193,14 +194,14 @@ jobs:
               }
               @keyframes wobble {
                 0% { transform: rotate(0deg) scale(1); }
-                25% { transform: rotate(-1.5deg) scale(1.01); }
-                50% { transform: rotate(1.5deg) scale(1.01); }
-                75% { transform: rotate(-1deg) scale(1.005); }
+                25% { transform: rotate(-1.2deg) scale(1.01); }
+                50% { transform: rotate(1.2deg) scale(1.01); }
+                75% { transform: rotate(-0.8deg) scale(1.005); }
                 100% { transform: rotate(0deg) scale(1); }
               }
               @keyframes shimmer {
                 0% { filter: brightness(1); }
-                50% { filter: brightness(1.15); }
+                50% { filter: brightness(1.12); }
                 100% { filter: brightness(1); }
               }
               @keyframes pulse {
@@ -214,11 +215,75 @@ jobs:
               .anim-wobble { animation: popIn 700ms ease-out both, wobble 3200ms ease-in-out infinite; }
               .anim-shimmer { animation: popIn 700ms ease-out both, shimmer 2400ms ease-in-out infinite; }
               .anim-pulse { animation: popIn 700ms ease-out both, pulse 2200ms ease-in-out infinite; }
+
+              /* ---- Visualizer (wave + bars) ---- */
+              .viz{
+                position: fixed;
+                left: 28px;
+                bottom: 42px;
+                width: 360px;
+                height: 120px;
+                border-radius: 18px;
+                overflow: hidden;
+                opacity: 0.75;
+                pointer-events: none;
+                background: linear-gradient(
+                  180deg,
+                  rgba(120,180,170,.55),
+                  rgba(140,200,180,.55)
+                );
+                box-shadow: 0 8px 24px rgba(0,0,0,.25);
+              }
+
+              .viz-wave{
+                position:absolute;
+                inset:0;
+                width:100%;
+                height:100%;
+                transform: translateZ(0);
+                will-change: transform;
+              }
+              .viz-wave .w{ fill: rgba(0,0,0,0.12); }
+              .viz-wave .w1{ opacity:.55; }
+              .viz-wave .w2{ opacity:.40; }
+              .viz-wave .w3{ opacity:.28; }
+
+              .viz-bars{
+                position:absolute;
+                left: 18px;
+                right: 18px;
+                bottom: 14px;
+                height: 86px;
+                display:flex;
+                align-items:flex-end;
+                gap: 8px;
+              }
+              .viz-bars span{
+                width: 10px;
+                height: 8px;
+                background: rgba(255,255,255,0.95);
+                border-radius: 6px 6px 0 0;
+                box-shadow: 0 2px 10px rgba(0,0,0,.15);
+                transition: height 160ms ease-out;
+                transform: translateZ(0);
+              }
             </style>
           </head>
           <body>
             <canvas id="c"></canvas>
-            <div class="overlay"><div class="box" id="t"></div></div>
+
+            <div class="overlay">
+              <div class="box" id="t"></div>
+            </div>
+
+            <div class="viz" id="viz">
+              <svg class="viz-wave" viewBox="0 0 520 180" preserveAspectRatio="none" aria-hidden="true">
+                <path class="w w1" d="M0,120 C60,90 120,150 180,120 C240,90 300,150 360,120 C420,90 460,150 520,120 L520,180 L0,180 Z"/>
+                <path class="w w2" d="M0,130 C70,105 140,155 210,130 C280,105 350,155 420,130 C470,110 495,150 520,130 L520,180 L0,180 Z"/>
+                <path class="w w3" d="M0,140 C90,125 160,165 250,140 C340,115 410,165 520,140 L520,180 L0,180 Z"/>
+              </svg>
+              <div class="viz-bars" id="vizBars" aria-hidden="true"></div>
+            </div>
 
             <script src="./confetti.js"></script>
             <script>
@@ -228,17 +293,17 @@ jobs:
               const H = Number(params.get("h") || 1920);
               const text = decodeURIComponent(params.get("text") || "");
 
-              // Mode-specific typography (both clamp 4 lines)
+              // Mode-specific typography: TikTok 10 lines, YouTube 5 lines
               const root = document.documentElement;
               if (mode === "youtube") {
-                root.style.setProperty("--fontSize", "42px");
+                root.style.setProperty("--fontSize", "38px");
                 root.style.setProperty("--padY", "20px");
                 root.style.setProperty("--padX", "26px");
                 root.style.setProperty("--maxW", "68vw");
                 root.style.setProperty("--maxH", "55vh");
                 root.style.setProperty("--clampLines", "5");
-              } else { // tiktok
-                root.style.setProperty("--fontSize", "42px");  // to hơn
+              } else {
+                root.style.setProperty("--fontSize", "44px");
                 root.style.setProperty("--padY", "22px");
                 root.style.setProperty("--padX", "30px");
                 root.style.setProperty("--maxW", "82vw");
@@ -253,7 +318,7 @@ jobs:
               const tEl = document.getElementById("t");
               tEl.textContent = text;
 
-              // Random text animation (changes every few seconds)
+              // Random text animation (changes every few seconds while visible)
               const textAnims = ["anim-pop","anim-float","anim-wobble","anim-shimmer","anim-pulse"];
               function applyRandomTextAnim() {
                 for (const a of textAnims) tEl.classList.remove(a);
@@ -261,9 +326,18 @@ jobs:
                 tEl.classList.add(pick);
               }
               applyRandomTextAnim();
-              setInterval(applyRandomTextAnim, 4500);
+              const animTimer = setInterval(applyRandomTextAnim, 4500);
 
-              // Load background
+              // Hide text after 15-20s, keep only visualizer
+              const hideAfter = 15000 + Math.floor(Math.random() * 5000);
+              setTimeout(() => {
+                clearInterval(animTimer);
+                tEl.style.opacity = "0";
+                tEl.style.transform = "scale(0.98)";
+                tEl.style.filter = "blur(1px)";
+              }, hideAfter);
+
+              // Background
               const bg = new Image();
               bg.src = new URL("./background.jpg", location.href).href;
 
@@ -277,11 +351,10 @@ jobs:
                 ctx.fillRect(0,0,w,h);
               }
 
-              // Confetti helpers
+              // ---- Confetti random presets ----
               const rand = (a,b)=> Math.random()*(b-a)+a;
               const pickOne = (arr)=> arr[Math.floor(Math.random()*arr.length)];
 
-              // Support custom shapes / emoji if available
               const emojiList = ["✨","🎉","💖","🔥","🌸","🍀","⭐","💯","🥳","🎊","🌟","🎈","🍋","🫶","😺","🦊","🐣"];
               const canShapeFromText = typeof confetti.shapeFromText === "function";
               const canShapeFromPath = typeof confetti.shapeFromPath === "function";
@@ -291,10 +364,10 @@ jobs:
                 : null;
 
               const customShapes = canShapeFromPath ? ([
-                confetti.shapeFromPath({ path: "M0 30 L15 0 L30 30 L15 22 Z" }), // diamond-ish
-                confetti.shapeFromPath({ path: "M15 0 C23 0 30 7 30 15 C30 23 23 30 15 30 C7 30 0 23 0 15 C0 7 7 0 15 0 Z" }), // circle
-                confetti.shapeFromPath({ path: "M15 0 L19 10 L30 10 L21 17 L24 30 L15 22 L6 30 L9 17 L0 10 L11 10 Z" }), // star
-                confetti.shapeFromPath({ path: "M0 15 L15 0 L30 15 L15 30 Z" }), // kite
+                confetti.shapeFromPath({ path: "M0 30 L15 0 L30 30 L15 22 Z" }),
+                confetti.shapeFromPath({ path: "M15 0 C23 0 30 7 30 15 C30 23 23 30 15 30 C7 30 0 23 0 15 C0 7 7 0 15 0 Z" }),
+                confetti.shapeFromPath({ path: "M15 0 L19 10 L30 10 L21 17 L24 30 L15 22 L6 30 L9 17 L0 10 L11 10 Z" }),
+                confetti.shapeFromPath({ path: "M0 15 L15 0 L30 15 L15 30 Z" }),
               ]) : null;
 
               function burst(opts){
@@ -312,43 +385,32 @@ jobs:
                 });
               }
 
-              // Presets
               function presetBasicCannon(){
-                burst({
-                  particleCount: 140,
-                  spread: 70,
-                  startVelocity: 55,
-                  origin: { x: 0.5, y: 0.95 }
-                });
+                burst({ particleCount: 140, spread: 70, startVelocity: 55, origin: { x: 0.5, y: 0.95 } });
               }
-
               function presetRandomDirection(){
-                const angle = rand(0, 360);
                 burst({
                   particleCount: 120,
                   spread: 140,
                   startVelocity: 35,
-                  angle,
-                  origin: { x: rand(0.15, 0.85), y: rand(0.2, 0.8) }
+                  angle: rand(0,360),
+                  origin: { x: rand(0.15,0.85), y: rand(0.2,0.8) }
                 });
               }
-
               function presetRealisticLook(){
                 burst({
                   particleCount: 160,
                   spread: 90,
                   startVelocity: 45,
                   gravity: 1.2,
-                  scalar: rand(0.8, 1.15),
-                  drift: rand(-0.6, 0.6),
+                  scalar: rand(0.8,1.15),
+                  drift: rand(-0.6,0.6),
                   ticks: 280,
-                  origin: { x: rand(0.2, 0.8), y: rand(0.2, 0.6) }
+                  origin: { x: rand(0.2,0.8), y: rand(0.2,0.6) }
                 });
               }
-
               function presetFireworks(){
-                const times = 3;
-                for (let i=0;i<times;i++){
+                for (let i=0;i<3;i++){
                   setTimeout(() => {
                     burst({
                       particleCount: 120,
@@ -356,14 +418,12 @@ jobs:
                       startVelocity: 28,
                       gravity: 0.9,
                       ticks: 260,
-                      origin: { x: rand(0.15, 0.85), y: rand(0.15, 0.45) }
+                      origin: { x: rand(0.15,0.85), y: rand(0.15,0.45) }
                     });
-                  }, i * 220);
+                  }, i*220);
                 }
               }
-
               function presetStars(){
-                // If shapes supported: use star path, else fallback normal
                 const shapes = (customShapes && customShapes[2]) ? [customShapes[2]] : undefined;
                 burst({
                   particleCount: 120,
@@ -373,12 +433,10 @@ jobs:
                   scalar: 1.1,
                   gravity: 0.95,
                   shapes,
-                  origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) }
+                  origin: { x: rand(0.2,0.8), y: rand(0.25,0.55) }
                 });
               }
-
               function presetSnow(){
-                // gentle downward, lots of small particles
                 burst({
                   particleCount: 220,
                   spread: 40,
@@ -386,18 +444,15 @@ jobs:
                   gravity: 0.7,
                   ticks: 380,
                   scalar: 0.7,
-                  drift: rand(-0.3, 0.3),
-                  origin: { x: rand(0.1, 0.9), y: 0.05 },
+                  drift: rand(-0.3,0.3),
+                  origin: { x: rand(0.1,0.9), y: 0.05 },
                   angle: 90
                 });
               }
-
               function presetSchoolPride(){
-                // two cannons from left/right bottom (no hardcoded colors)
                 burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.1, y: 0.95 }, angle: 60 });
                 burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.9, y: 0.95 }, angle: 120 });
               }
-
               function presetCustomShapes(){
                 if (customShapes) {
                   burst({
@@ -405,15 +460,14 @@ jobs:
                     spread: 120,
                     startVelocity: 42,
                     ticks: 260,
-                    scalar: rand(0.9, 1.2),
+                    scalar: rand(0.9,1.2),
                     shapes: [pickOne(customShapes)],
-                    origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.6) }
+                    origin: { x: rand(0.2,0.8), y: rand(0.25,0.6) }
                   });
                 } else {
                   presetRealisticLook();
                 }
               }
-
               function presetEmoji(){
                 if (emojiShapes) {
                   burst({
@@ -422,9 +476,9 @@ jobs:
                     startVelocity: 38,
                     ticks: 280,
                     gravity: 1.0,
-                    scalar: rand(0.9, 1.2),
+                    scalar: rand(0.9,1.2),
                     shapes: [pickOne(emojiShapes)],
-                    origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) }
+                    origin: { x: rand(0.2,0.8), y: rand(0.25,0.55) }
                   });
                 } else {
                   presetBasicCannon();
@@ -432,28 +486,72 @@ jobs:
               }
 
               const presets = [
-                { name: "Basic Cannon", fn: presetBasicCannon },
-                { name: "Random Direction", fn: presetRandomDirection },
-                { name: "Realistic Look", fn: presetRealisticLook },
-                { name: "Fireworks", fn: presetFireworks },
-                { name: "Stars", fn: presetStars },
-                { name: "Snow", fn: presetSnow },
-                { name: "School Pride", fn: presetSchoolPride },
-                { name: "Custom Shapes", fn: presetCustomShapes },
-                { name: "Emoji", fn: presetEmoji },
+                presetBasicCannon,
+                presetRandomDirection,
+                presetRealisticLook,
+                presetFireworks,
+                presetStars,
+                presetSnow,
+                presetSchoolPride,
+                presetCustomShapes,
+                presetEmoji,
               ];
 
+              // ---- Visualizer bars (your final settings) ----
+              const vizBars = document.getElementById("vizBars");
+              const BAR_COUNT = 22;
+              for (let i = 0; i < BAR_COUNT; i++) {
+                vizBars.appendChild(document.createElement("span"));
+              }
+              const bars = Array.from(vizBars.children);
+
+              const bases  = bars.map(() => 24 + Math.random() * 40);
+              const amps   = bars.map(() => 12 + Math.random() * 18);
+              const phases = bars.map(() => Math.random() * Math.PI * 2);
+
+              let t = 0;
+              function tickBars(){
+                t += 0.018;
+                bars.forEach((el, i) => {
+                  const h =
+                    bases[i] +
+                    Math.sin(t + phases[i]) * amps[i] +
+                    Math.sin(t * 0.5 + phases[i]) * 3;
+                  el.style.height = `${Math.max(6, h)}px`;
+                });
+                requestAnimationFrame(tickBars);
+              }
+              tickBars();
+
+              // ---- Subtle wave breathing (3 layers) ----
+              const waves = [
+                document.querySelector(".w1"),
+                document.querySelector(".w2"),
+                document.querySelector(".w3"),
+              ];
+
+              let wt = Math.random() * Math.PI * 2;
+              function tickWaves(){
+                wt += 0.006;
+                waves.forEach((w, i) => {
+                  if (!w) return;
+                  const driftX = Math.sin(wt + i * 1.4) * (1.2 + i * 0.4);
+                  const driftY = Math.sin(wt * 0.8 + i * 2.1) * (0.8 + i * 0.3);
+                  const scaleY = 1 + Math.sin(wt * 0.6 + i) * 0.015;
+                  w.style.transform = `translate(${driftX}px, ${driftY}px) scaleY(${scaleY})`;
+                });
+                requestAnimationFrame(tickWaves);
+              }
+              tickWaves();
+
+              // Main loop
               let last = 0;
               function loop(ts){
                 drawBg();
-
-                // confetti every ~900ms with random preset
                 if (ts - last > 900) {
-                  const p = pickOne(presets);
-                  p.fn();
+                  pickOne(presets)();
                   last = ts;
                 }
-
                 requestAnimationFrame(loop);
               }
 
