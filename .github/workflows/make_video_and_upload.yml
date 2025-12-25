@@ -207,16 +207,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          make_url () {
-            MODE="$1"
-            if [ "$MODE" = "youtube" ]; then
-              W=1920; H=1080
-            else
-              W=1080; H=1920
-            fi
-            TEXT_ENC="$(cat work/summary_encoded.txt)"
-            echo "file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&text=${TEXT_ENC}"
-          }
+          TEXT_ENC="$(cat work/summary_encoded.txt)"
 
           record_one () {
             MODE="$1"
@@ -228,19 +219,17 @@ jobs:
               OUT="work/loop_tiktok.mp4"
             fi
 
-            xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc "
-              set -euo pipefail
-              URL=\$(python3 - <<PY
-import os
-mode='$MODE'
-w,h=(1920,1080) if mode=='youtube' else (1080,1920)
-text=open('work/summary_encoded.txt','r',encoding='utf-8').read().strip()
-print(f'file://{os.environ['GITHUB_WORKSPACE']}/web/scene.html?w={w}&h={h}&text={text}')
-PY
-)
-              echo \"URL=\$URL\"
+            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&text=${TEXT_ENC}"
+            echo "URL=$URL"
 
-              # Start chromium in app/kiosk mode -> no tab bar, no address bar
+            xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc '
+              set -euo pipefail
+              MODE="'"$MODE"'"
+              W="'"$W"'"
+              H="'"$H"'"
+              OUT="'"$OUT"'"
+              URL="'"$URL"'"
+
               chromium-browser \
                 --no-sandbox \
                 --disable-setuid-sandbox \
@@ -249,23 +238,22 @@ PY
                 --no-first-run \
                 --no-default-browser-check \
                 --disable-infobars \
-                --app=\"\$URL\" \
+                --app="$URL" \
                 --kiosk \
                 --window-position=0,0 \
                 --window-size=${W},${H} \
                 --user-data-dir=/tmp/chrome-${MODE}-$$ \
                 >/dev/null 2>&1 &
 
-              CP=\$!
+              CP=$!
               sleep 2
 
-              # Record 10s only (small loop clip)
-              ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i \$DISPLAY+0,0 \
-                -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \"$OUT\"
+              ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i $DISPLAY+0,0 \
+                -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 "$OUT"
 
-              kill \$CP || true
-              wait \$CP || true
-            "
+              kill $CP || true
+              wait $CP || true
+            '
 
             test -s "$OUT"
             echo "OK: $OUT"
