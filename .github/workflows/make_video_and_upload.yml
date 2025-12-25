@@ -124,7 +124,7 @@ jobs:
             --output work/tts.mp3
           test -s work/tts.mp3
 
-      - name: Create web scene (text auto-hide + random confetti + visualizer wave/bars)
+      - name: Create web scene (confetti presets + text hide + visualizer)
         run: |
           set -euo pipefail
           mkdir -p web
@@ -148,7 +148,7 @@ jobs:
                 align-items:flex-start;
                 justify-content:center;
                 pointer-events:none;
-                padding-top: 190px;
+                padding-top: var(--overlayTop, 150px);
               }
 
               :root{
@@ -159,6 +159,7 @@ jobs:
                 --maxW: 82vw;
                 --maxH: 68vh;
                 --clampLines: 10;
+                --overlayTop: 150px;
               }
 
               .box{
@@ -225,15 +226,15 @@ jobs:
                 left: 50%;
                 transform: translateX(-50%);
                 bottom: 36px;
-              
-                width: 520px;        /* sẽ override bằng JS theo mode */
-                height: 140px;       /* to hơn */
+
+                width: 520px;
+                height: 180px;
+
                 border-radius: 22px;
                 overflow: hidden;
-              
                 opacity: 0.78;
                 pointer-events: none;
-              
+
                 background: linear-gradient(
                   180deg,
                   rgba(120,180,170,.55),
@@ -266,12 +267,17 @@ jobs:
                 gap: 6px;
               }
               .viz-bars span{
-                width: 12px;
+                flex: 1 1 0;
+                width: auto;
+                min-width: 0;
+                max-width: none;
+
                 height: 8px;
                 background: rgba(255,255,255,0.95);
                 border-radius: 7px 7px 0 0;
                 box-shadow: 0 2px 10px rgba(0,0,0,.15);
                 transition: height 160ms ease-out;
+                transform: translateZ(0);
               }
             </style>
           </head>
@@ -299,9 +305,10 @@ jobs:
               const H = Number(params.get("h") || 1920);
               const text = decodeURIComponent(params.get("text") || "");
 
-              // Mode-specific typography: TikTok 10 lines, YouTube 5 lines
               const root = document.documentElement;
               const viz = document.getElementById("viz");
+
+              // Mode-specific typography + layout
               if (mode === "youtube") {
                 root.style.setProperty("--fontSize", "38px");
                 root.style.setProperty("--padY", "20px");
@@ -310,8 +317,9 @@ jobs:
                 root.style.setProperty("--maxH", "55vh");
                 root.style.setProperty("--clampLines", "5");
                 root.style.setProperty("--overlayTop", "170px");
+
                 viz.style.width = "720px";
-                viz.style.height = "180px";
+                viz.style.height = "165px";
                 viz.style.bottom = "40px";
               } else {
                 root.style.setProperty("--fontSize", "44px");
@@ -321,9 +329,10 @@ jobs:
                 root.style.setProperty("--maxH", "68vh");
                 root.style.setProperty("--clampLines", "10");
                 root.style.setProperty("--overlayTop", "150px");
+
                 viz.style.width = "92vw";
                 viz.style.maxWidth = "980px";
-                viz.style.height = "165px";
+                viz.style.height = "180px";
                 viz.style.bottom = "36px";
               }
 
@@ -513,27 +522,28 @@ jobs:
                 presetEmoji,
               ];
 
-              // ---- Visualizer bars (your final settings) ----
+              // ---- Visualizer bars (your final chosen settings) ----
               const vizBars = document.getElementById("vizBars");
-              const BAR_COUNT = 22;
+              const BAR_COUNT = 35;
               for (let i = 0; i < BAR_COUNT; i++) {
                 vizBars.appendChild(document.createElement("span"));
               }
               const bars = Array.from(vizBars.children);
 
-              const bases  = bars.map(() => 24 + Math.random() * 40);
+              const bases  = bars.map(() => 24 + Math.random() * 50);
               const amps   = bars.map(() => 12 + Math.random() * 18);
               const phases = bars.map(() => Math.random() * Math.PI * 2);
 
               let t = 0;
+              const HMAX = 120; // must match .viz-bars height
               function tickBars(){
-                t += 0.024;
+                t += 0.03;
                 bars.forEach((el, i) => {
                   const h =
                     bases[i] +
                     Math.sin(t + phases[i]) * amps[i] +
                     Math.sin(t * 0.5 + phases[i]) * 3;
-                  el.style.height = `${Math.max(6, h)}px`;
+                  el.style.height = `${Math.max(6, Math.min(HMAX, h))}px`;
                 });
                 requestAnimationFrame(tickBars);
               }
@@ -571,10 +581,7 @@ jobs:
                 requestAnimationFrame(loop);
               }
 
-              bg.onload = () => {
-                window.__READY__ = true;
-                requestAnimationFrame(loop);
-              };
+              bg.onload = () => requestAnimationFrame(loop);
             </script>
           </body>
           </html>
@@ -616,6 +623,7 @@ jobs:
                 --disable-infobars \
                 --disable-features=Translate,TranslateUI \
                 --lang=vi \
+                --force-device-scale-factor=1 \
                 --app="$URL" \
                 --kiosk \
                 --window-position=0,0 \
@@ -626,9 +634,10 @@ jobs:
               CP=$!
               sleep 2
 
-              # Record 10s only (small loop clip)
-              ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i $DISPLAY+0,0 \
-                -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 "$OUT"
+              # Record 10s loop clip (higher quality)
+              ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 60 -i $DISPLAY+0,0 \
+                -t 10 -c:v libx264 -pix_fmt yuv420p -preset medium -crf 17 \
+                -movflags +faststart "$OUT"
 
               kill $CP || true
               wait $CP || true
@@ -652,7 +661,7 @@ jobs:
           )
           ffmpeg -y -stream_loop -1 -i work/loop_tiktok.mp4 -i work/tts.mp3 \
             -t "$ADUR_CEIL" \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 17 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/tiktok.mp4
 
@@ -667,7 +676,7 @@ jobs:
           )
           ffmpeg -y -stream_loop -1 -i work/loop_youtube.mp4 -i work/tts.mp3 \
             -t "$ADUR_CEIL" \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
+            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 17 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/youtube.mp4
 
