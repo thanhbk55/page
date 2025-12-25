@@ -233,14 +233,14 @@ jobs:
         run: |
           set -euo pipefail
           CAPTION="$TITLE"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
-            -F video=@work/tiktok.mp4 | jq .
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendVideo" \
+            -F document=@work/tiktok.mp4 | jq .
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
-            -F video=@work/youtube.mp4 | jq .
+            -F document=@work/youtube.mp4 | jq .
           curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="$TG_CHAT_ID" \
             -F caption="$CAPTION" \
