@@ -124,7 +124,7 @@ jobs:
             --output work/tts.mp3
           test -s work/tts.mp3
 
-      - name: Create web scene (local confetti, local bg)
+      - name: Create web scene (text effects + random confetti presets)
         run: |
           set -euo pipefail
           mkdir -p web
@@ -133,21 +133,87 @@ jobs:
 
           cat > web/scene.html <<'HTML'
           <!doctype html>
-          <html>
+          <html translate="no">
           <head>
             <meta charset="utf-8" />
+            <meta name="google" content="notranslate">
             <link rel="icon" href="data:,">
             <style>
               html,body { margin:0; background:#000; overflow:hidden; }
               canvas { position:fixed; inset:0; width:100vw; height:100vh; }
-              .overlay{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
-              .box{
-                color:#fff; font:700 56px system-ui, -apple-system, "Noto Sans", sans-serif;
-                text-align:center; white-space:pre-wrap; line-height:1.25;
-                background:rgba(0,0,0,.5); padding:36px 46px; border-radius:32px;
-                max-width: 80vw;
-                text-shadow: 0 2px 10px rgba(0,0,0,.7);
+
+              .overlay{
+                position:fixed; inset:0;
+                display:flex; align-items:center; justify-content:center;
+                pointer-events:none;
               }
+
+              /* Mode-driven sizing */
+              :root{
+                --fontSize: 34px;
+                --padY: 18px;
+                --padX: 24px;
+                --radius: 20px;
+                --maxW: 72vw;
+                --maxH: 40vh;
+                --clampLines: 4;
+              }
+
+              .box{
+                color:#fff;
+                font:600 var(--fontSize) system-ui, -apple-system, "Noto Sans", sans-serif;
+                text-align:center;
+                line-height:1.35;
+
+                background:rgba(0,0,0,.45);
+                padding: var(--padY) var(--padX);
+                border-radius: var(--radius);
+                max-width: var(--maxW);
+                max-height: var(--maxH);
+
+                overflow:hidden;
+                display:-webkit-box;
+                -webkit-line-clamp: var(--clampLines);
+                -webkit-box-orient: vertical;
+
+                text-shadow: 0 2px 10px rgba(0,0,0,.7);
+                transform: translateZ(0);
+                will-change: transform, filter, opacity;
+              }
+
+              /* Random text animations */
+              @keyframes popIn {
+                0% { transform: scale(.92); opacity:0; filter: blur(2px); }
+                100% { transform: scale(1); opacity:1; filter: blur(0); }
+              }
+              @keyframes floaty {
+                0% { transform: translateY(0); }
+                50% { transform: translateY(-6px); }
+                100% { transform: translateY(0); }
+              }
+              @keyframes wobble {
+                0% { transform: rotate(0deg) scale(1); }
+                25% { transform: rotate(-1.5deg) scale(1.01); }
+                50% { transform: rotate(1.5deg) scale(1.01); }
+                75% { transform: rotate(-1deg) scale(1.005); }
+                100% { transform: rotate(0deg) scale(1); }
+              }
+              @keyframes shimmer {
+                0% { filter: brightness(1); }
+                50% { filter: brightness(1.15); }
+                100% { filter: brightness(1); }
+              }
+              @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.02); }
+                100% { transform: scale(1); }
+              }
+
+              .anim-pop { animation: popIn 700ms ease-out both; }
+              .anim-float { animation: popIn 700ms ease-out both, floaty 2600ms ease-in-out infinite; }
+              .anim-wobble { animation: popIn 700ms ease-out both, wobble 3200ms ease-in-out infinite; }
+              .anim-shimmer { animation: popIn 700ms ease-out both, shimmer 2400ms ease-in-out infinite; }
+              .anim-pulse { animation: popIn 700ms ease-out both, pulse 2200ms ease-in-out infinite; }
             </style>
           </head>
           <body>
@@ -157,22 +223,49 @@ jobs:
             <script src="./confetti.js"></script>
             <script>
               const params = new URLSearchParams(location.search);
+              const mode = (params.get("mode") || "tiktok").toLowerCase(); // tiktok|youtube
               const W = Number(params.get("w") || 1080);
               const H = Number(params.get("h") || 1920);
               const text = decodeURIComponent(params.get("text") || "");
-              document.getElementById("t").textContent = text;
+
+              // Mode-specific typography (both clamp 4 lines)
+              const root = document.documentElement;
+              if (mode === "youtube") {
+                root.style.setProperty("--fontSize", "30px");
+                root.style.setProperty("--padY", "16px");
+                root.style.setProperty("--padX", "22px");
+                root.style.setProperty("--maxW", "62vw");
+                root.style.setProperty("--maxH", "44vh");
+                root.style.setProperty("--clampLines", "4");
+              } else { // tiktok
+                root.style.setProperty("--fontSize", "34px");
+                root.style.setProperty("--padY", "18px");
+                root.style.setProperty("--padX", "24px");
+                root.style.setProperty("--maxW", "74vw");
+                root.style.setProperty("--maxH", "40vh");
+                root.style.setProperty("--clampLines", "4");
+              }
 
               const canvas = document.getElementById("c");
               const ctx = canvas.getContext("2d");
               canvas.width = W; canvas.height = H;
 
+              const tEl = document.getElementById("t");
+              tEl.textContent = text;
+
+              // Random text animation (changes every few seconds)
+              const textAnims = ["anim-pop","anim-float","anim-wobble","anim-shimmer","anim-pulse"];
+              function applyRandomTextAnim() {
+                for (const a of textAnims) tEl.classList.remove(a);
+                const pick = textAnims[Math.floor(Math.random() * textAnims.length)];
+                tEl.classList.add(pick);
+              }
+              applyRandomTextAnim();
+              setInterval(applyRandomTextAnim, 4500);
+
+              // Load background
               const bg = new Image();
               bg.src = new URL("./background.jpg", location.href).href;
-
-              bg.onload = () => {
-                window.__READY__ = true;
-                requestAnimationFrame(loop);
-              };
 
               function drawBg(){
                 const w = canvas.width, h = canvas.height;
@@ -184,20 +277,190 @@ jobs:
                 ctx.fillRect(0,0,w,h);
               }
 
-              const burst = () => confetti({
-                particleCount: 120,
-                spread: 120,
-                startVelocity: 45,
-                ticks: 220,
-                origin: { x: Math.random()*0.8 + 0.1, y: Math.random()*0.4 + 0.2 }
-              });
+              // Confetti helpers
+              const rand = (a,b)=> Math.random()*(b-a)+a;
+              const pickOne = (arr)=> arr[Math.floor(Math.random()*arr.length)];
+
+              // Support custom shapes / emoji if available
+              const emojiList = ["✨","🎉","💖","🔥","🌸","🍀","⭐","💯","🥳","🎊","🌟","🎈","🍋","🫶","😺","🦊","🐣"];
+              const canShapeFromText = typeof confetti.shapeFromText === "function";
+              const canShapeFromPath = typeof confetti.shapeFromPath === "function";
+
+              const emojiShapes = canShapeFromText
+                ? emojiList.map(e => confetti.shapeFromText({ text: e, scalar: 1.2 }))
+                : null;
+
+              const customShapes = canShapeFromPath ? ([
+                confetti.shapeFromPath({ path: "M0 30 L15 0 L30 30 L15 22 Z" }), // diamond-ish
+                confetti.shapeFromPath({ path: "M15 0 C23 0 30 7 30 15 C30 23 23 30 15 30 C7 30 0 23 0 15 C0 7 7 0 15 0 Z" }), // circle
+                confetti.shapeFromPath({ path: "M15 0 L19 10 L30 10 L21 17 L24 30 L15 22 L6 30 L9 17 L0 10 L11 10 Z" }), // star
+                confetti.shapeFromPath({ path: "M0 15 L15 0 L30 15 L15 30 Z" }), // kite
+              ]) : null;
+
+              function burst(opts){
+                confetti({
+                  particleCount: opts.particleCount ?? 120,
+                  spread: opts.spread ?? 100,
+                  startVelocity: opts.startVelocity ?? 45,
+                  ticks: opts.ticks ?? 220,
+                  gravity: opts.gravity ?? 0.9,
+                  scalar: opts.scalar ?? 1,
+                  drift: opts.drift ?? 0,
+                  origin: opts.origin ?? { x: 0.5, y: 0.7 },
+                  angle: opts.angle,
+                  shapes: opts.shapes,
+                });
+              }
+
+              // Presets
+              function presetBasicCannon(){
+                burst({
+                  particleCount: 140,
+                  spread: 70,
+                  startVelocity: 55,
+                  origin: { x: 0.5, y: 0.95 }
+                });
+              }
+
+              function presetRandomDirection(){
+                const angle = rand(0, 360);
+                burst({
+                  particleCount: 120,
+                  spread: 140,
+                  startVelocity: 35,
+                  angle,
+                  origin: { x: rand(0.15, 0.85), y: rand(0.2, 0.8) }
+                });
+              }
+
+              function presetRealisticLook(){
+                burst({
+                  particleCount: 160,
+                  spread: 90,
+                  startVelocity: 45,
+                  gravity: 1.2,
+                  scalar: rand(0.8, 1.15),
+                  drift: rand(-0.6, 0.6),
+                  ticks: 280,
+                  origin: { x: rand(0.2, 0.8), y: rand(0.2, 0.6) }
+                });
+              }
+
+              function presetFireworks(){
+                const times = 3;
+                for (let i=0;i<times;i++){
+                  setTimeout(() => {
+                    burst({
+                      particleCount: 120,
+                      spread: 360,
+                      startVelocity: 28,
+                      gravity: 0.9,
+                      ticks: 260,
+                      origin: { x: rand(0.15, 0.85), y: rand(0.15, 0.45) }
+                    });
+                  }, i * 220);
+                }
+              }
+
+              function presetStars(){
+                // If shapes supported: use star path, else fallback normal
+                const shapes = (customShapes && customShapes[2]) ? [customShapes[2]] : undefined;
+                burst({
+                  particleCount: 120,
+                  spread: 110,
+                  startVelocity: 38,
+                  ticks: 260,
+                  scalar: 1.1,
+                  gravity: 0.95,
+                  shapes,
+                  origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) }
+                });
+              }
+
+              function presetSnow(){
+                // gentle downward, lots of small particles
+                burst({
+                  particleCount: 220,
+                  spread: 40,
+                  startVelocity: 10,
+                  gravity: 0.7,
+                  ticks: 380,
+                  scalar: 0.7,
+                  drift: rand(-0.3, 0.3),
+                  origin: { x: rand(0.1, 0.9), y: 0.05 },
+                  angle: 90
+                });
+              }
+
+              function presetSchoolPride(){
+                // two cannons from left/right bottom (no hardcoded colors)
+                burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.1, y: 0.95 }, angle: 60 });
+                burst({ particleCount: 90, spread: 55, startVelocity: 50, origin: { x: 0.9, y: 0.95 }, angle: 120 });
+              }
+
+              function presetCustomShapes(){
+                if (customShapes) {
+                  burst({
+                    particleCount: 140,
+                    spread: 120,
+                    startVelocity: 42,
+                    ticks: 260,
+                    scalar: rand(0.9, 1.2),
+                    shapes: [pickOne(customShapes)],
+                    origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.6) }
+                  });
+                } else {
+                  presetRealisticLook();
+                }
+              }
+
+              function presetEmoji(){
+                if (emojiShapes) {
+                  burst({
+                    particleCount: 90,
+                    spread: 120,
+                    startVelocity: 38,
+                    ticks: 280,
+                    gravity: 1.0,
+                    scalar: rand(0.9, 1.2),
+                    shapes: [pickOne(emojiShapes)],
+                    origin: { x: rand(0.2, 0.8), y: rand(0.25, 0.55) }
+                  });
+                } else {
+                  presetBasicCannon();
+                }
+              }
+
+              const presets = [
+                { name: "Basic Cannon", fn: presetBasicCannon },
+                { name: "Random Direction", fn: presetRandomDirection },
+                { name: "Realistic Look", fn: presetRealisticLook },
+                { name: "Fireworks", fn: presetFireworks },
+                { name: "Stars", fn: presetStars },
+                { name: "Snow", fn: presetSnow },
+                { name: "School Pride", fn: presetSchoolPride },
+                { name: "Custom Shapes", fn: presetCustomShapes },
+                { name: "Emoji", fn: presetEmoji },
+              ];
 
               let last = 0;
               function loop(ts){
                 drawBg();
-                if (ts - last > 800) { burst(); last = ts; }
+
+                // confetti every ~900ms with random preset
+                if (ts - last > 900) {
+                  const p = pickOne(presets);
+                  p.fn();
+                  last = ts;
+                }
+
                 requestAnimationFrame(loop);
               }
+
+              bg.onload = () => {
+                window.__READY__ = true;
+                requestAnimationFrame(loop);
+              };
             </script>
           </body>
           </html>
@@ -206,7 +469,6 @@ jobs:
       - name: Record loop videos via chromium --app (chromeless) + ffmpeg x11grab
         run: |
           set -euo pipefail
-
           TEXT_ENC="$(cat work/summary_encoded.txt)"
 
           record_one () {
@@ -219,7 +481,7 @@ jobs:
               OUT="work/loop_tiktok.mp4"
             fi
 
-            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&text=${TEXT_ENC}"
+            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}"
             echo "URL=$URL"
 
             xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc '
@@ -238,6 +500,8 @@ jobs:
                 --no-first-run \
                 --no-default-browser-check \
                 --disable-infobars \
+                --disable-features=Translate,TranslateUI \
+                --lang=vi \
                 --app="$URL" \
                 --kiosk \
                 --window-position=0,0 \
@@ -248,6 +512,7 @@ jobs:
               CP=$!
               sleep 2
 
+              # Record 10s only (small loop clip)
               ffmpeg -y -f x11grab -video_size ${W}x${H} -framerate 30 -i $DISPLAY+0,0 \
                 -t 10 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 "$OUT"
 
