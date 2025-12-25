@@ -226,6 +226,17 @@ jobs:
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/youtube.mp4
+      - name: Show output file sizes
+        run: |
+          set -euo pipefail
+          echo "=== File sizes ==="
+          ls -lh work/*.mp4 work/tts.mp3 || true
+          echo
+          echo "=== Video duration ==="
+          ffprobe -v error -show_entries format=duration \
+            -of default=nw=1:nk=1 work/tiktok.mp4
+          ffprobe -v error -show_entries format=duration \
+            -of default=nw=1:nk=1 work/youtube.mp4
 
       - name: Upload to Telegram
         env:
