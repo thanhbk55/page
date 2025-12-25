@@ -1,4 +1,4 @@
-name: "TTS + Video TikTok/YouTube -> Telegram"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram"
 
 on:
   repository_dispatch:
@@ -23,10 +23,28 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3
+          sudo apt-get install -y ffmpeg jq curl fonts-noto-core fontconfig python3 \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install npm deps (canvas + canvas-confetti)
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Write inputs to files (safe)
         env:
@@ -112,91 +130,55 @@ jobs:
             exit 1
           fi
 
-      - name: Wrap summary text for video
-        run: |
-          set -euo pipefail
-          python3 - << 'PY'
-          import re
-          src = open("work/summary.txt","r",encoding="utf-8").read().strip()
-          src = re.sub(r"\s+"," ",src)
-          def wrap(src, max_chars=26, max_lines=7):
-            words = src.split(" ")
-            lines, cur = [], []
-            for w in words:
-              if sum(len(x) for x in cur) + len(cur) + len(w) <= max_chars:
-                cur.append(w)
-              else:
-                lines.append(" ".join(cur))
-                cur = [w]
-            if cur: lines.append(" ".join(cur))
-            if len(lines) > max_lines:
-              lines = lines[:max_lines-1] + ["… " + lines[max_lines-1]]
-            return "\n".join(lines)
-          open("work/summary_wrapped_tiktok.txt","w",encoding="utf-8").write(wrap(src, 26, 7))
-          open("work/summary_wrapped_youtube.txt","w",encoding="utf-8").write(wrap(src, 38, 5))
-          PY
-
-      - name: Render TikTok (1080x1920) + audio
+      - name: Compute duration
         run: |
           set -euo pipefail
           DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
-          DUR_S=$(python3 - <<PY
-          dur=float("$DUR"); print(max(1.0, dur))
+          python3 - <<PY
+          dur=float("$DUR")
+          dur=max(1.0,dur)
+          open("work/duration.txt","w").write(str(dur))
+          print(dur)
           PY
-          )
-          FADE_OUT_START=$(python3 - <<PY
-          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
-          PY
-          )
+
+      - name: Render frames (confetti overlay)
+        run: |
+          set -euo pipefail
+          DUR="$(cat work/duration.txt)"
           FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
           if [ ! -f "$FONT" ]; then
             FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
           fi
-          ffmpeg -y \
-            -loop 1 -i work/background.jpg \
-            -i work/tts.mp3 \
-            -filter_complex "\
-              [0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920, \
-                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
-              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_tiktok.txt:reload=0: \
-                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=64:fontcolor=white:line_spacing=18: \
-                box=1:boxcolor=black@0.50:boxborderw=46:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
-                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
-            -map "[v]" -map "1:a" \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
-            -c:a aac -b:a 192k \
-            -t ${DUR_S} work/tiktok.mp4
 
-      - name: Render YouTube (1920x1080) + audio
+          mkdir -p work/frames_tiktok work/frames_youtube
+
+          node scripts/render_confetti_frames.mjs \
+            --w=1080 --h=1920 --fps=30 --dur="$DUR" \
+            --bg=work/background.jpg \
+            --out=work/frames_tiktok \
+            --text="$(cat work/summary_oneline.txt)" \
+            --font="$FONT"
+
+          node scripts/render_confetti_frames.mjs \
+            --w=1920 --h=1080 --fps=30 --dur="$DUR" \
+            --bg=work/background.jpg \
+            --out=work/frames_youtube \
+            --text="$(cat work/summary_oneline.txt)" \
+            --font="$FONT"
+
+      - name: Build TikTok mp4 (frames + audio)
         run: |
           set -euo pipefail
-          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
-          DUR_S=$(python3 - <<PY
-          dur=float("$DUR"); print(max(1.0, dur))
-          PY
-          )
-          FADE_OUT_START=$(python3 - <<PY
-          dur=float("$DUR_S"); print(max(0.0, dur-0.7))
-          PY
-          )
-          FONT="/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-          if [ ! -f "$FONT" ]; then
-            FONT="$(fc-list | grep -i "noto sans" | head -n 1 | cut -d: -f1 || true)"
-          fi
-          ffmpeg -y \
-            -loop 1 -i work/background.jpg \
-            -i work/tts.mp3 \
-            -filter_complex "\
-              [0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080, \
-                gblur=sigma=2,eq=brightness=0.05:saturation=0.95[bg]; \
-              [bg]drawtext=fontfile='${FONT}':textfile=work/summary_wrapped_youtube.txt:reload=0: \
-                x=(w-text_w)/2:y=(h-text_h)/2:fontsize=56:fontcolor=white:line_spacing=16: \
-                box=1:boxcolor=black@0.48:boxborderw=40:shadowcolor=black@0.35:shadowx=3:shadowy=3, \
-                fade=t=in:st=0:d=0.40,fade=t=out:st=${FADE_OUT_START}:d=0.70[v]" \
-            -map "[v]" -map "1:a" \
+          ffmpeg -y -framerate 30 -i work/frames_tiktok/%04d.png -i work/tts.mp3 \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
-            -c:a aac -b:a 192k \
-            -t ${DUR_S} work/youtube.mp4
+            -c:a aac -b:a 192k -shortest work/tiktok.mp4
+
+      - name: Build YouTube mp4 (frames + audio)
+        run: |
+          set -euo pipefail
+          ffmpeg -y -framerate 30 -i work/frames_youtube/%04d.png -i work/tts.mp3 \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 19 \
+            -c:a aac -b:a 192k -shortest work/youtube.mp4
 
       - name: Upload to Telegram (caption = date + summary short)
         env:
@@ -228,3 +210,5 @@ jobs:
             work/tiktok.mp4
             work/youtube.mp4
             work/upload.txt
+            work/frames_tiktok
+            work/frames_youtube
