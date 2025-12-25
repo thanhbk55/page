@@ -1,4 +1,4 @@
-name: "Video Backup"
+name: "Generate Video"
 
 on:
   repository_dispatch:
