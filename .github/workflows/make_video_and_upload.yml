@@ -148,7 +148,7 @@ jobs:
                 align-items:flex-start;
                 justify-content:center;
                 pointer-events:none;
-                padding-top: 220px;
+                padding-top: 190px;
               }
 
               :root{
@@ -257,22 +257,21 @@ jobs:
 
               .viz-bars{
                 position:absolute;
-                left: 22px;
-                right: 22px;
+                left: 10px;
+                right: 10px;
                 bottom: 16px;
-                height: 105px;
+                height: 120px;
                 display:flex;
                 align-items:flex-end;
-                gap: 10px;
+                gap: 6px;
               }
               .viz-bars span{
-                width: 10px;
+                width: 12px;
                 height: 8px;
                 background: rgba(255,255,255,0.95);
-                border-radius: 6px 6px 0 0;
+                border-radius: 7px 7px 0 0;
                 box-shadow: 0 2px 10px rgba(0,0,0,.15);
                 transition: height 160ms ease-out;
-                transform: translateZ(0);
               }
             </style>
           </head>
@@ -310,8 +309,9 @@ jobs:
                 root.style.setProperty("--maxW", "68vw");
                 root.style.setProperty("--maxH", "55vh");
                 root.style.setProperty("--clampLines", "5");
+                root.style.setProperty("--overlayTop", "170px");
                 viz.style.width = "720px";
-                viz.style.height = "150px";
+                viz.style.height = "180px";
                 viz.style.bottom = "40px";
               } else {
                 root.style.setProperty("--fontSize", "44px");
@@ -320,9 +320,10 @@ jobs:
                 root.style.setProperty("--maxW", "82vw");
                 root.style.setProperty("--maxH", "68vh");
                 root.style.setProperty("--clampLines", "10");
+                root.style.setProperty("--overlayTop", "150px");
                 viz.style.width = "92vw";
                 viz.style.maxWidth = "980px";
-                viz.style.height = "160px";
+                viz.style.height = "165px";
                 viz.style.bottom = "36px";
               }
 
@@ -526,7 +527,7 @@ jobs:
 
               let t = 0;
               function tickBars(){
-                t += 0.018;
+                t += 0.024;
                 bars.forEach((el, i) => {
                   const h =
                     bases[i] +
