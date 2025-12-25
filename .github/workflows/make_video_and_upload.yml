@@ -1,4 +1,4 @@
-name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core, record 60s + loop)"
+name: "TTS + Confetti Video TikTok/YouTube -> Telegram (puppeteer-core, record 60s + loop, no CDN)"
 
 on:
   repository_dispatch:
@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install npm deps (puppeteer-core + puppeteer-stream)
+      - name: Install npm deps (puppeteer-core + puppeteer-stream + canvas-confetti)
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -138,21 +138,13 @@ jobs:
             exit 1
           fi
 
-      - name: Compute audio duration
-        run: |
-          set -euo pipefail
-          DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 work/tts.mp3)
-          python3 - <<PY
-          dur=float("$DUR"); dur=max(1.0,dur)
-          open("work/duration.txt","w").write(str(dur))
-          print(dur)
-          PY
-
-      # --- Create the 60s loop video (NO frames) ---
-      - name: Create web scene + recorder script
+      - name: Create web scene + recorder script (no CDN)
         run: |
           set -euo pipefail
           mkdir -p web scripts
+
+          # Use local canvas-confetti bundle (avoid CDN/network)
+          cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
 
           cat > web/scene.html <<'HTML'
           <!doctype html>
@@ -176,7 +168,8 @@ jobs:
             <canvas id="c"></canvas>
             <div class="overlay"><div class="box" id="t"></div></div>
 
-            <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+            <!-- local, no CDN -->
+            <script src="./confetti.js"></script>
             <script>
               const params = new URLSearchParams(location.search);
               const W = Number(params.get("w") || 1080);
@@ -241,9 +234,7 @@ jobs:
             fs.existsSync("/usr/bin/chromium-browser") ? "/usr/bin/chromium-browser" :
             (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : "");
 
-          if (!execPath) {
-            throw new Error("Chromium executable not found at /usr/bin/chromium-browser or /usr/bin/chromium");
-          }
+          if (!execPath) throw new Error("Chromium executable not found at /usr/bin/chromium-browser or /usr/bin/chromium");
 
           const browser = await puppeteer.launch({
             executablePath: execPath,
@@ -257,13 +248,15 @@ jobs:
           });
 
           const page = await browser.newPage();
+          page.setDefaultNavigationTimeout(120000);
+          page.setDefaultTimeout(120000);
           await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
 
           const url = `file://${process.cwd()}/web/scene.html?w=${w}&h=${h}&text=${encodeURIComponent(text)}`;
-          await page.goto(url, { waitUntil: "load" });
+          await page.goto(url, { waitUntil: "domcontentloaded" });
 
           await page.evaluate((b)=>{ window.__BG__ = b; }, bgDataUrl);
-          await page.reload({ waitUntil: "load" });
+          await page.reload({ waitUntil: "domcontentloaded" });
 
           // stabilize
           await new Promise(r => setTimeout(r, 1000));
@@ -296,7 +289,6 @@ jobs:
           ffmpeg -y -i work/loop_youtube.webm \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 work/loop_youtube.mp4
 
-      # --- Loop 60s video until audio ends ---
       - name: Loop video to match audio + mux audio (TikTok)
         run: |
           set -euo pipefail
