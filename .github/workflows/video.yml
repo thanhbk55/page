@@ -516,6 +516,12 @@ jobs:
           upload_one work/youtube.mp4 youtube video/mp4
           upload_one work/upload.json meta application/json
 
+      - name: Notify API video_story done
+        run: |
+          set -euo pipefail
+          curl -sS -X POST "https://docxiu.onrender.com/api/workflows/video_story?token=a9f04e7b85c943f48e2cd01ebd4c" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"done"}' | jq .
 
       - name: Upload artifacts (optional)
         uses: actions/upload-artifact@v4
