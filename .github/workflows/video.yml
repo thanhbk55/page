@@ -338,9 +338,10 @@ jobs:
           set -euo pipefail
 
           FOLDER_NAME="$(cat work/folder_name.txt)"
-          test -n "$ROOT_FOLDER_ID"
-          test -n "$FOLDER_NAME"
+          test -n "${ROOT_FOLDER_ID:-}"
+          test -n "${FOLDER_NAME:-}"
 
+          # Escape for Drive query (single quotes)
           esc_q () {
             python3 - "$1" <<'PY'
           import sys
@@ -350,32 +351,68 @@ jobs:
           PY
           }
 
+          # URL-encode query param value
+          urlenc () {
+            python3 - "$1" <<'PY'
+          import sys, urllib.parse
+          print(urllib.parse.quote(sys.argv[1], safe=""))
+          PY
+          }
+
+          drive_get () {
+            # $1 = url
+            curl -sS -D /tmp/drive_headers.txt -o /tmp/drive_body.txt \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "$1" || true
+            code="$(head -n 1 /tmp/drive_headers.txt | awk '{print $2}')"
+            echo "$code"
+          }
+
+          drive_post_json () {
+            # $1 = url, $2 = json
+            curl -sS -D /tmp/drive_headers.txt -o /tmp/drive_body.txt \
+              -X POST "$1" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json; charset=UTF-8" \
+              -d "$2" || true
+            code="$(head -n 1 /tmp/drive_headers.txt | awk '{print $2}')"
+            echo "$code"
+          }
+
           # Find or create subfolder under ROOT_FOLDER_ID
           get_or_create_folder () {
             NAME="$1"
             QNAME="$(esc_q "$NAME")"
             Q="mimeType='application/vnd.google-apps.folder' and name='${QNAME}' and '${ROOT_FOLDER_ID}' in parents and trashed=false"
 
-            RES="$(curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://www.googleapis.com/drive/v3/files?$(jq -rn --arg q "$Q" '$q|@uri')&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true")"
+            QENC="$(urlenc "$Q")"
+            URL="https://www.googleapis.com/drive/v3/files?q=${QENC}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true"
 
-            ID="$(echo "$RES" | jq -r '.files[0].id // empty')"
+            code="$(drive_get "$URL")"
+            if [ "$code" != "200" ]; then
+              echo "Drive search folder failed (HTTP $code)"
+              cat /tmp/drive_body.txt
+              exit 1
+            fi
+
+            ID="$(jq -r '.files[0].id // empty' /tmp/drive_body.txt)"
             if [ -n "$ID" ]; then
               echo "$ID"
               return
             fi
 
-            # create folder
             META="$(jq -n --arg name "$NAME" --arg parent "$ROOT_FOLDER_ID" \
               '{name:$name, mimeType:"application/vnd.google-apps.folder", parents:[$parent]}')"
 
-            CREATED="$(curl -sS -X POST "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json; charset=UTF-8" \
-              -d "$META")"
+            code="$(drive_post_json "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true" "$META")"
+            if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+              echo "Drive create folder failed (HTTP $code)"
+              cat /tmp/drive_body.txt
+              exit 1
+            fi
 
-            NEWID="$(echo "$CREATED" | jq -r '.id')"
-            test -n "$NEWID" && test "$NEWID" != "null"
+            NEWID="$(jq -r '.id // empty' /tmp/drive_body.txt)"
+            test -n "$NEWID"
             echo "$NEWID"
           }
 
@@ -391,25 +428,48 @@ jobs:
 
             META="$(jq -n --arg name "$NAME" --arg folder "$TARGET_FOLDER_ID" '{name:$name, parents:[$folder]}')"
 
+            # Create resumable session (need Location header)
             HEADERS="$(mktemp)"
-            curl -sS -D "$HEADERS" -o /dev/null \
+            BODY="$(mktemp)"
+            curl -sS -D "$HEADERS" -o "$BODY" \
               -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id&supportsAllDrives=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json; charset=UTF-8" \
-              -d "$META"
+              -d "$META" || true
+
+            code="$(head -n 1 "$HEADERS" | awk '{print $2}')"
+            if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+              echo "Create resumable session failed (HTTP $code)"
+              cat "$BODY"
+              rm -f "$HEADERS" "$BODY"
+              exit 1
+            fi
 
             UPLOAD_URL="$(grep -i '^location:' "$HEADERS" | sed -E 's/^location:\s*//I' | tr -d '\r')"
-            rm -f "$HEADERS"
+            rm -f "$HEADERS" "$BODY"
             test -n "$UPLOAD_URL"
 
-            RES="$(curl -sS -X PUT "$UPLOAD_URL" \
+            # Upload bytes
+            RES_HEADERS="$(mktemp)"
+            RES_BODY="$(mktemp)"
+            curl -sS -D "$RES_HEADERS" -o "$RES_BODY" \
+              -X PUT "$UPLOAD_URL" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Length: $FILESIZE" \
               -H "Content-Type: video/mp4" \
-              --upload-file "$FILEPATH")"
+              --upload-file "$FILEPATH" || true
 
-            FILE_ID="$(echo "$RES" | jq -r .id)"
-            test -n "$FILE_ID" && test "$FILE_ID" != "null"
+            up_code="$(head -n 1 "$RES_HEADERS" | awk '{print $2}')"
+            if [ "$up_code" != "200" ] && [ "$up_code" != "201" ]; then
+              echo "Upload bytes failed (HTTP $up_code)"
+              cat "$RES_BODY"
+              rm -f "$RES_HEADERS" "$RES_BODY"
+              exit 1
+            fi
+
+            FILE_ID="$(jq -r '.id // empty' "$RES_BODY")"
+            rm -f "$RES_HEADERS" "$RES_BODY"
+            test -n "$FILE_ID"
 
             # Make shareable (anyone with link)
             curl -sS -X POST "https://www.googleapis.com/drive/v3/files/$FILE_ID/permissions?supportsAllDrives=true" \
@@ -429,27 +489,6 @@ jobs:
 
           upload_one work/tiktok.mp4 tiktok
           upload_one work/youtube.mp4 youtube
-
-      - name: Upload to Telegram
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TITLE: ${{ steps.prep.outputs.title }}
-        run: |
-          set -euo pipefail
-          CAPTION="$TITLE"
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
-            -F chat_id="$TG_CHAT_ID" \
-            -F caption="$CAPTION" \
-            -F document=@work/tiktok.mp4 | jq .
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
-            -F chat_id="$TG_CHAT_ID" \
-            -F caption="$CAPTION" \
-            -F document=@work/youtube.mp4 | jq .
-          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
-            -F chat_id="$TG_CHAT_ID" \
-            -F caption="$CAPTION" \
-            -F document=@work/upload.txt | jq .
 
       - name: Upload artifacts (optional)
         uses: actions/upload-artifact@v4
