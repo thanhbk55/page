@@ -11,9 +11,20 @@ on:
       full:
         description: "Full text (used for TTS audio)"
         required: true
-      background_url:
-        description: "Background image URL"
+
+      # NEW: separate backgrounds
+      background_tiktok_url:
+        description: "TikTok background (Drive fileId or Drive URL)"
         required: true
+      background_youtube_url:
+        description: "YouTube background (Drive fileId or Drive URL)"
+        required: true
+
+      # NEW: subfolder name under root folder
+      folder_name:
+        description: "Drive subfolder name under GDRIVE_FOLDER_ID"
+        required: true
+
       voice:
         description: "TTS voice"
         required: false
@@ -64,29 +75,50 @@ jobs:
 
       - name: Write inputs to files (safe)
         env:
+          # repository_dispatch payload
           SUMMARY_DISPATCH: ${{ github.event.client_payload.summary }}
           FULL_DISPATCH: ${{ github.event.client_payload.full }}
-          BG_URL_DISPATCH: ${{ github.event.client_payload.background_url }}
+          BG_TT_DISPATCH: ${{ github.event.client_payload.background_tiktok_url }}
+          BG_YT_DISPATCH: ${{ github.event.client_payload.background_youtube_url }}
+          FOLDER_DISPATCH: ${{ github.event.client_payload.folder_name }}
           VOICE_DISPATCH: ${{ github.event.client_payload.voice }}
+
+          # workflow_dispatch inputs
           SUMMARY_INPUT: ${{ inputs.summary }}
           FULL_INPUT: ${{ inputs.full }}
-          BG_URL_INPUT: ${{ inputs.background_url }}
+          BG_TT_INPUT: ${{ inputs.background_tiktok_url }}
+          BG_YT_INPUT: ${{ inputs.background_youtube_url }}
+          FOLDER_INPUT: ${{ inputs.folder_name }}
           VOICE_INPUT: ${{ inputs.voice }}
         run: |
           set -euo pipefail
           mkdir -p work
           python3 - <<'PY'
-          import os
+          import os, re
+
           summary = os.environ.get("SUMMARY_DISPATCH") or os.environ.get("SUMMARY_INPUT") or ""
           full = os.environ.get("FULL_DISPATCH") or os.environ.get("FULL_INPUT") or ""
-          bg_url = os.environ.get("BG_URL_DISPATCH") or os.environ.get("BG_URL_INPUT") or ""
+          bg_tt = os.environ.get("BG_TT_DISPATCH") or os.environ.get("BG_TT_INPUT") or ""
+          bg_yt = os.environ.get("BG_YT_DISPATCH") or os.environ.get("BG_YT_INPUT") or ""
+          folder = os.environ.get("FOLDER_DISPATCH") or os.environ.get("FOLDER_INPUT") or ""
           voice = os.environ.get("VOICE_DISPATCH") or os.environ.get("VOICE_INPUT") or "vi-VN-HoaiMyNeural"
+
           if not summary.strip(): raise SystemExit("Missing summary")
           if not full.strip(): raise SystemExit("Missing full")
-          if not bg_url.strip(): raise SystemExit("Missing background_url")
+          if not bg_tt.strip(): raise SystemExit("Missing background_tiktok_url")
+          if not bg_yt.strip(): raise SystemExit("Missing background_youtube_url")
+          if not folder.strip(): raise SystemExit("Missing folder_name")
+
+          # sanitize folder a bit (avoid weird chars)
+          folder = re.sub(r'[\/\\:*?"<>|]+', "-", folder.strip())
+          folder = re.sub(r"\s+", " ", folder).strip()
+          if not folder: raise SystemExit("Invalid folder_name")
+
           open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
           open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
-          open("work/bg_url.txt","w",encoding="utf-8").write(bg_url.strip()+"\n")
+          open("work/bg_tiktok.txt","w",encoding="utf-8").write(bg_tt.strip()+"\n")
+          open("work/bg_youtube.txt","w",encoding="utf-8").write(bg_yt.strip()+"\n")
+          open("work/folder_name.txt","w",encoding="utf-8").write(folder+"\n")
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
           print("OK")
           PY
@@ -113,6 +145,7 @@ jobs:
           cat > work/upload.txt <<EOF
           Title: $TITLE
           Date: $DATE
+          Folder: $(cat work/folder_name.txt)
 
           Summary:
           $SUMMARY_ONELINE
@@ -121,11 +154,60 @@ jobs:
           $(cat work/full.txt)
           EOF
 
-      - name: Download background image
+      # MOVE UP: get token BEFORE downloading backgrounds
+      - name: Get Google access token
+        id: gauth
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
-          curl -sS -L "$(cat work/bg_url.txt)" --output work/background.jpg
-          test -s work/background.jpg
+          TOKEN_JSON="$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            -d client_id="$GDRIVE_CLIENT_ID" \
+            -d client_secret="$GDRIVE_CLIENT_SECRET" \
+            -d refresh_token="$GDRIVE_REFRESH_TOKEN" \
+            -d grant_type=refresh_token)"
+          ACCESS_TOKEN="$(echo "$TOKEN_JSON" | jq -r .access_token)"
+          test -n "$ACCESS_TOKEN" && test "$ACCESS_TOKEN" != "null"
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Download backgrounds from Google Drive (auth alt=media)
+        env:
+          ACCESS_TOKEN: ${{ steps.gauth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          extract_file_id () {
+            # Accept: fileId OR drive url (/file/d/ID/...) OR uc?id=ID
+            python3 - "$1" <<'PY'
+          import re, sys
+          s=sys.argv[1].strip()
+          # direct fileId (rough)
+          if re.fullmatch(r"[A-Za-z0-9_-]{10,}", s):
+            print(s); sys.exit(0)
+          m=re.search(r"/file/d/([A-Za-z0-9_-]+)", s)
+          if m: print(m.group(1)); sys.exit(0)
+          m=re.search(r"[?&]id=([A-Za-z0-9_-]+)", s)
+          if m: print(m.group(1)); sys.exit(0)
+          raise SystemExit("Cannot extract drive fileId from: " + s)
+          PY
+          }
+
+          download_one () {
+            SRC="$1"
+            OUT="$2"
+            ID="$(extract_file_id "$SRC")"
+            echo "Downloading fileId=$ID -> $OUT"
+            curl -sS -L \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files/$ID?alt=media&supportsAllDrives=true" \
+              -o "$OUT"
+            test -s "$OUT"
+          }
+
+          download_one "$(cat work/bg_tiktok.txt)"  work/background_tiktok.jpg
+          download_one "$(cat work/bg_youtube.txt)" work/background_youtube.jpg
 
       - name: Generate TTS from full text (mp3)
         run: |
@@ -140,15 +222,10 @@ jobs:
       - name: Prepare web assets (use committed web/scene.html)
         run: |
           set -euo pipefail
-
-          # Ensure scene.html exists in repo
           test -s web/scene.html
-
-          # Copy confetti runtime + background image into web/
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
-          cp work/background.jpg web/background.jpg
 
-      - name: Record loop videos via chromium --app (chromeless) + ffmpeg x11grab
+      - name: Record loop videos via chromium --app (separate backgrounds)
         run: |
           set -euo pipefail
           TEXT_ENC="$(cat work/summary_encoded.txt)"
@@ -158,9 +235,13 @@ jobs:
             if [ "$MODE" = "youtube" ]; then
               W=1920; H=1080
               OUT="work/loop_youtube.mp4"
+              # youtube background
+              cp work/background_youtube.jpg web/background.jpg
             else
               W=1080; H=1920
               OUT="work/loop_tiktok.mp4"
+              # tiktok background
+              cp work/background_tiktok.jpg web/background.jpg
             fi
 
             URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}"
@@ -237,6 +318,7 @@ jobs:
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
             work/youtube.mp4
+
       - name: Show output file sizes
         run: |
           set -euo pipefail
@@ -244,54 +326,74 @@ jobs:
           ls -lh work/*.mp4 work/tts.mp3 || true
           echo
           echo "=== Video duration ==="
-          ffprobe -v error -show_entries format=duration \
-            -of default=nw=1:nk=1 work/tiktok.mp4
-          ffprobe -v error -show_entries format=duration \
-            -of default=nw=1:nk=1 work/youtube.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tiktok.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/youtube.mp4
 
-      - name: Get Google access token
-        id: gauth
-        env:
-          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
-          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
-          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
-        run: |
-          set -euo pipefail
-          TOKEN_JSON="$(curl -sS -X POST https://oauth2.googleapis.com/token \
-            -d client_id="$GDRIVE_CLIENT_ID" \
-            -d client_secret="$GDRIVE_CLIENT_SECRET" \
-            -d refresh_token="$GDRIVE_REFRESH_TOKEN" \
-            -d grant_type=refresh_token)"
-
-          ACCESS_TOKEN="$(echo "$TOKEN_JSON" | jq -r .access_token)"
-          test -n "$ACCESS_TOKEN" && test "$ACCESS_TOKEN" != "null"
-          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
-
-      - name: Upload videos to Google Drive
+      - name: Upload videos to Google Drive (into subfolder name)
         id: gdrive
         env:
           ACCESS_TOKEN: ${{ steps.gauth.outputs.access_token }}
-          FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          ROOT_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: |
           set -euo pipefail
 
+          FOLDER_NAME="$(cat work/folder_name.txt)"
+          test -n "$ROOT_FOLDER_ID"
+          test -n "$FOLDER_NAME"
+
+          esc_q () {
+            python3 - "$1" <<'PY'
+          import sys
+          s=sys.argv[1]
+          s=s.replace("\\","\\\\").replace("'","\\'")
+          print(s)
+          PY
+          }
+
+          # Find or create subfolder under ROOT_FOLDER_ID
+          get_or_create_folder () {
+            NAME="$1"
+            QNAME="$(esc_q "$NAME")"
+            Q="mimeType='application/vnd.google-apps.folder' and name='${QNAME}' and '${ROOT_FOLDER_ID}' in parents and trashed=false"
+
+            RES="$(curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files?$(jq -rn --arg q "$Q" '$q|@uri')&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true")"
+
+            ID="$(echo "$RES" | jq -r '.files[0].id // empty')"
+            if [ -n "$ID" ]; then
+              echo "$ID"
+              return
+            fi
+
+            # create folder
+            META="$(jq -n --arg name "$NAME" --arg parent "$ROOT_FOLDER_ID" \
+              '{name:$name, mimeType:"application/vnd.google-apps.folder", parents:[$parent]}')"
+
+            CREATED="$(curl -sS -X POST "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json; charset=UTF-8" \
+              -d "$META")"
+
+            NEWID="$(echo "$CREATED" | jq -r '.id')"
+            test -n "$NEWID" && test "$NEWID" != "null"
+            echo "$NEWID"
+          }
+
+          TARGET_FOLDER_ID="$(get_or_create_folder "$FOLDER_NAME")"
+          echo "Target folder id: $TARGET_FOLDER_ID"
+
           upload_one () {
             FILEPATH="$1"
-            OUTKEY="$2"   # output key prefix (tiktok / youtube)
+            OUTKEY="$2"
 
             NAME="$(basename "$FILEPATH")"
             FILESIZE="$(stat -c%s "$FILEPATH")"
 
-            if [ -n "${FOLDER_ID:-}" ]; then
-              META="$(jq -n --arg name "$NAME" --arg folder "$FOLDER_ID" '{name:$name, parents:[$folder]}')"
-            else
-              META="$(jq -n --arg name "$NAME" '{name:$name}')"
-            fi
+            META="$(jq -n --arg name "$NAME" --arg folder "$TARGET_FOLDER_ID" '{name:$name, parents:[$folder]}')"
 
-            # Create resumable session
             HEADERS="$(mktemp)"
             curl -sS -D "$HEADERS" -o /dev/null \
-              -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id" \
+              -X POST "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id&supportsAllDrives=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json; charset=UTF-8" \
               -d "$META"
@@ -300,7 +402,6 @@ jobs:
             rm -f "$HEADERS"
             test -n "$UPLOAD_URL"
 
-            # Upload bytes
             RES="$(curl -sS -X PUT "$UPLOAD_URL" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Length: $FILESIZE" \
@@ -311,14 +412,13 @@ jobs:
             test -n "$FILE_ID" && test "$FILE_ID" != "null"
 
             # Make shareable (anyone with link)
-            curl -sS -X POST "https://www.googleapis.com/drive/v3/files/$FILE_ID/permissions" \
+            curl -sS -X POST "https://www.googleapis.com/drive/v3/files/$FILE_ID/permissions?supportsAllDrives=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
               -d '{"type":"anyone","role":"reader","allowFileDiscovery":false}' >/dev/null
 
-            # Fetch links
             INFO="$(curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://www.googleapis.com/drive/v3/files/$FILE_ID?fields=webViewLink,webContentLink")"
+              "https://www.googleapis.com/drive/v3/files/$FILE_ID?fields=webViewLink,webContentLink&supportsAllDrives=true")"
 
             VIEW="$(echo "$INFO" | jq -r .webViewLink)"
             DL="$(echo "$INFO" | jq -r .webContentLink)"
@@ -362,3 +462,5 @@ jobs:
             work/tiktok.mp4
             work/youtube.mp4
             work/upload.txt
+            work/background_tiktok.jpg
+            work/background_youtube.jpg
