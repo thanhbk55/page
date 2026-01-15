@@ -266,34 +266,23 @@ jobs:
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 60 \
               "$URL" -o "work/chapters_text/${IDX}.json"
 
-            # Extract text from JSON (try multiple keys)
-            python3 - "$IDX" <<'PY'
-            import json, sys
-            idx=sys.argv[1]
-            p=f"work/chapters_text/{idx}.json"
-            data=json.load(open(p, "r", encoding="utf-8"))
-            
-            def pick_text(obj):
-              if isinstance(obj, str) and obj.strip():
-                return obj.strip()
-              return ""
-            
-            text = ""
-            if isinstance(data, dict):
-              for k in ["content", "text", "body", "chapterContent"]:
-                text = pick_text(data.get(k))
-                if text: break
-              if (not text) and isinstance(data.get("data"), dict):
-                for k in ["content", "text", "body"]:
-                  text = pick_text(data["data"].get(k))
-                  if text: break
-            
-            if not text:
-              raise SystemExit(f"No content text found in JSON for idx={idx}")
-            
-            open(f"work/chapters_text/{idx}.txt", "w", encoding="utf-8").write(text + "\n")
-            print(f"OK text idx={idx}, chars={len(text)}")
-            PY
+            # Extract text from JSON safely (no heredoc)
+            python3 -c "import json,sys; idx=sys.argv[1]; p=f'work/chapters_text/{idx}.json'; data=json.load(open(p,'r',encoding='utf-8')); \
+            def pick(x): return x.strip() if isinstance(x,str) and x.strip() else ''; \
+            txt=''; \
+            d=data if isinstance(data,dict) else {}; \
+            for k in ['content','text','body','chapterContent']: \
+              txt=pick(d.get(k)); \
+              if txt: break; \
+            if (not txt) and isinstance(d.get('data'),dict): \
+              for k in ['content','text','body']: \
+                txt=pick(d['data'].get(k)); \
+                if txt: break; \
+            \
+            (0/0 if not txt else None); \
+            open(f'work/chapters_text/{idx}.txt','w',encoding='utf-8').write(txt+'\\n'); \
+            print(f'OK text idx={idx}, chars={len(txt)}')" "$IDX" \
+                          || (echo "No content text found in JSON idx=$IDX" && cat "work/chapters_text/${IDX}.json" && exit 1)
 
             # Generate TTS mp3 per chapter
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
@@ -302,7 +291,8 @@ jobs:
               -d "$(jq -n --arg text "$(cat work/chapters_text/${IDX}.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
               --output "work/chapters_audio/${IDX}.mp3"
 
-            ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "work/chapters_audio/${IDX}.mp3" >/dev/null
+            ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 \
+              "work/chapters_audio/${IDX}.mp3" >/dev/null
             ls -lh "work/chapters_audio/${IDX}.mp3"
           done < work/chapters.txt
 
@@ -311,14 +301,14 @@ jobs:
           # TikTok: first chapter only
           cp "work/chapters_audio/001.mp3" work/tts_tiktok.mp3
 
-          # YouTube: concat all chapters
+          # YouTube: concat all chapters (re-encode for stability)
           rm -f work/concat_list.txt
           for f in work/chapters_audio/*.mp3; do
             echo "file '$(realpath "$f")'" >> work/concat_list.txt
           done
 
-          # Try stream copy concat; if fails in your env, switch to re-encode.
-          ffmpeg -y -f concat -safe 0 -i work/concat_list.txt -c copy work/tts_youtube.mp3
+          ffmpeg -y -f concat -safe 0 -i work/concat_list.txt \
+            -c:a libmp3lame -b:a 192k work/tts_youtube.mp3
 
           ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_tiktok.mp3 >/dev/null
           ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_youtube.mp3 >/dev/null
