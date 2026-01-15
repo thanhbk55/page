@@ -268,32 +268,32 @@ jobs:
 
             # Extract text from JSON (try multiple keys)
             python3 - "$IDX" <<'PY'
-import json, sys
-idx=sys.argv[1]
-p=f"work/chapters_text/{idx}.json"
-data=json.load(open(p, "r", encoding="utf-8"))
+            import json, sys
+            idx=sys.argv[1]
+            p=f"work/chapters_text/{idx}.json"
+            data=json.load(open(p, "r", encoding="utf-8"))
 
-def pick_text(obj):
-  if isinstance(obj, str) and obj.strip():
-    return obj.strip()
-  return ""
+            def pick_text(obj):
+              if isinstance(obj, str) and obj.strip():
+                return obj.strip()
+              return ""
 
-text = ""
-if isinstance(data, dict):
-  for k in ["content", "text", "body", "chapterContent"]:
-    text = pick_text(data.get(k))
-    if text: break
-  if (not text) and isinstance(data.get("data"), dict):
-    for k in ["content", "text", "body"]:
-      text = pick_text(data["data"].get(k))
-      if text: break
+            text = ""
+            if isinstance(data, dict):
+              for k in ["content", "text", "body", "chapterContent"]:
+                text = pick_text(data.get(k))
+                if text: break
+              if (not text) and isinstance(data.get("data"), dict):
+                for k in ["content", "text", "body"]:
+                  text = pick_text(data["data"].get(k))
+                  if text: break
 
-if not text:
-  raise SystemExit(f"No content text found in JSON for idx={idx}")
+            if not text:
+              raise SystemExit(f"No content text found in JSON for idx={idx}")
 
-open(f"work/chapters_text/{idx}.txt", "w", encoding="utf-8").write(text + "\n")
-print(f"OK text idx={idx}, chars={len(text)}")
-PY
+            open(f"work/chapters_text/{idx}.txt", "w", encoding="utf-8").write(text + "\n")
+            print(f"OK text idx={idx}, chars={len(text)}")
+            PY
 
             # Generate TTS mp3 per chapter
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
