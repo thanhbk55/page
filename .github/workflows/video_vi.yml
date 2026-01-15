@@ -698,7 +698,10 @@ jobs:
           set -euo pipefail
           curl -sS -X POST "https://docxiu.onrender.com/api/workflows/video_story?token=a9f04e7b85c943f48e2cd01ebd4c" \
             -H "Content-Type: application/json" \
-            -d '{"status":"done"}' | jq .
+            -d "$(jq -n \
+              --arg status "done" \
+              --arg storyId "$STORY_ID" \
+              '{status: $status, storyId: $storyId}')" | jq .
 
       - name: Upload artifacts (debug bundle)
         uses: actions/upload-artifact@v4
