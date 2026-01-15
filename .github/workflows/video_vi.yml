@@ -255,6 +255,40 @@ jobs:
 
           mkdir -p work/chapters_text work/chapters_audio
 
+          # Create extractor script ONCE (no heredoc issues)
+          python3 - <<'PY'
+          code = r'''import json,sys
+
+          idx=sys.argv[1]
+          p=f"work/chapters_text/{idx}.json"
+          with open(p,"r",encoding="utf-8") as f:
+              data=json.load(f)
+
+          def pick(x):
+              return x.strip() if isinstance(x,str) and x.strip() else ""
+
+          text=""
+          if isinstance(data,dict):
+              for k in ["content","text","body","chapterContent"]:
+                  text=pick(data.get(k))
+                  if text: break
+              if (not text) and isinstance(data.get("data"),dict):
+                  for k in ["content","text","body"]:
+                      text=pick(data["data"].get(k))
+                      if text: break
+
+          if not text:
+              raise SystemExit("No content text found")
+
+          out=f"work/chapters_text/{idx}.txt"
+          with open(out,"w",encoding="utf-8") as f:
+              f.write(text + "\\n")
+          print(f"OK text idx={idx}, chars={len(text)}")
+          '''
+          open("work/extract_text.py","w",encoding="utf-8").write(code)
+          print("Wrote work/extract_text.py")
+          PY
+
           i=0
           while IFS= read -r CH; do
             [ -n "$CH" ] || continue
@@ -266,25 +300,8 @@ jobs:
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 60 \
               "$URL" -o "work/chapters_text/${IDX}.json"
 
-            # Extract text from JSON safely (no heredoc)
-            python3 -c "import json,sys; idx=sys.argv[1]; p=f'work/chapters_text/{idx}.json'; data=json.load(open(p,'r',encoding='utf-8')); \
-            def pick(x): return x.strip() if isinstance(x,str) and x.strip() else ''; \
-            txt=''; \
-            d=data if isinstance(data,dict) else {}; \
-            for k in ['content','text','body','chapterContent']: \
-              txt=pick(d.get(k)); \
-              if txt: break; \
-            if (not txt) and isinstance(d.get('data'),dict): \
-              for k in ['content','text','body']: \
-                txt=pick(d['data'].get(k)); \
-                if txt: break; \
-            \
-            (0/0 if not txt else None); \
-            open(f'work/chapters_text/{idx}.txt','w',encoding='utf-8').write(txt+'\\n'); \
-            print(f'OK text idx={idx}, chars={len(txt)}')" "$IDX" \
-                          || (echo "No content text found in JSON idx=$IDX" && cat "work/chapters_text/${IDX}.json" && exit 1)
+            python3 work/extract_text.py "$IDX" || (cat "work/chapters_text/${IDX}.json" && exit 1)
 
-            # Generate TTS mp3 per chapter
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
               -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
               -H "Content-Type: application/json" \
@@ -293,15 +310,12 @@ jobs:
 
             ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 \
               "work/chapters_audio/${IDX}.mp3" >/dev/null
-            ls -lh "work/chapters_audio/${IDX}.mp3"
           done < work/chapters.txt
 
           test "$i" -ge 1
 
-          # TikTok: first chapter only
           cp "work/chapters_audio/001.mp3" work/tts_tiktok.mp3
 
-          # YouTube: concat all chapters (re-encode for stability)
           rm -f work/concat_list.txt
           for f in work/chapters_audio/*.mp3; do
             echo "file '$(realpath "$f")'" >> work/concat_list.txt
@@ -310,8 +324,6 @@ jobs:
           ffmpeg -y -f concat -safe 0 -i work/concat_list.txt \
             -c:a libmp3lame -b:a 192k work/tts_youtube.mp3
 
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_tiktok.mp3 >/dev/null
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_youtube.mp3 >/dev/null
 
       - name: Upload artifact (tts)
         uses: actions/upload-artifact@v4
