@@ -12,6 +12,9 @@ on:
       storySlug:
         description: "Story slug"
         required: true
+      storyId:
+        description: "Story ID"
+        required: true
       chapters:
         description: "Comma or newline separated chapter slugs (e.g. chuong1, chuong2, chuong3)"
         required: true
