@@ -272,12 +272,12 @@ jobs:
             idx=sys.argv[1]
             p=f"work/chapters_text/{idx}.json"
             data=json.load(open(p, "r", encoding="utf-8"))
-
+            
             def pick_text(obj):
               if isinstance(obj, str) and obj.strip():
                 return obj.strip()
               return ""
-
+            
             text = ""
             if isinstance(data, dict):
               for k in ["content", "text", "body", "chapterContent"]:
@@ -287,10 +287,10 @@ jobs:
                 for k in ["content", "text", "body"]:
                   text = pick_text(data["data"].get(k))
                   if text: break
-
+            
             if not text:
               raise SystemExit(f"No content text found in JSON for idx={idx}")
-
+            
             open(f"work/chapters_text/{idx}.txt", "w", encoding="utf-8").write(text + "\n")
             print(f"OK text idx={idx}, chars={len(text)}")
             PY
