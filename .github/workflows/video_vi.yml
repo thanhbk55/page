@@ -8,13 +8,12 @@ on:
       summary:
         description: "Summary text (shown on video)"
         required: true
-      full:
-        description: "Full text (used for YouTube TTS audio)"
-        required: true
 
-      # NEW: TikTok audio content (separate from full)
-      content_tiktok:
-        description: "TikTok content (used for TikTok TTS audio)"
+      storySlug:
+        description: "Story slug"
+        required: true
+      chapters:
+        description: "Comma or newline separated chapter slugs (e.g. chuong1, chuong2, chuong3)"
         required: true
 
       background_tiktok_url:
@@ -40,11 +39,14 @@ on:
 
 env:
   TZ: Asia/Tokyo
+
   # Pick values from repository_dispatch payload OR workflow_dispatch input
   ACCESS_TOKEN: ${{ github.event.client_payload.access_token || inputs.access_token }}
   SUMMARY: ${{ github.event.client_payload.summary || inputs.summary }}
-  FULL: ${{ github.event.client_payload.full || inputs.full }}
-  CONTENT_TIKTOK: ${{ github.event.client_payload.content_tiktok || inputs.content_tiktok }}
+
+  STORY_SLUG: ${{ github.event.client_payload.storySlug || inputs.storySlug }}
+  CHAPTERS: ${{ github.event.client_payload.chapters || inputs.chapters }}
+
   BG_TT: ${{ github.event.client_payload.background_tiktok_url || inputs.background_tiktok_url }}
   BG_YT: ${{ github.event.client_payload.background_youtube_url || inputs.background_youtube_url }}
   FOLDER_NAME: ${{ github.event.client_payload.folder_name || inputs.folder_name }}
@@ -65,8 +67,9 @@ jobs:
           import os, re
 
           summary = os.environ.get("SUMMARY") or ""
-          full = os.environ.get("FULL") or ""
-          content_tiktok = os.environ.get("CONTENT_TIKTOK") or ""
+          story_slug = os.environ.get("STORY_SLUG") or ""
+          chapters_raw = os.environ.get("CHAPTERS") or ""
+
           bg_tt = os.environ.get("BG_TT") or ""
           bg_yt = os.environ.get("BG_YT") or ""
           folder = os.environ.get("FOLDER_NAME") or ""
@@ -74,25 +77,36 @@ jobs:
           token = os.environ.get("ACCESS_TOKEN") or ""
 
           if not summary.strip(): raise SystemExit("Missing summary")
-          if not full.strip(): raise SystemExit("Missing full")
-          if not content_tiktok.strip(): raise SystemExit("Missing content_tiktok")
+          if not story_slug.strip(): raise SystemExit("Missing storySlug")
+          if not chapters_raw.strip(): raise SystemExit("Missing chapters")
           if not bg_tt.strip(): raise SystemExit("Missing background_tiktok_url")
           if not bg_yt.strip(): raise SystemExit("Missing background_youtube_url")
           if not folder.strip(): raise SystemExit("Missing folder_name")
           if not token.strip(): raise SystemExit("Missing access_token")
 
+          # sanitize folder name for Drive subfolder
           folder = re.sub(r'[\/\\:*?"<>|]+', "-", folder.strip())
           folder = re.sub(r"\s+", " ", folder).strip()
           if not folder: raise SystemExit("Invalid folder_name")
 
+          # parse chapters: allow comma/newline/space separated
+          parts = re.split(r"[,\n\r\t ]+", chapters_raw.strip())
+          chapters = [p.strip() for p in parts if p.strip()]
+          if not chapters: raise SystemExit("No valid chapter slugs in chapters")
+
+          # simple slug validation (adjust if your slug allows unicode)
+          bad = [c for c in chapters if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", c)]
+          if bad:
+            raise SystemExit("Invalid chapter slugs: " + ", ".join(bad))
+
           open("work/summary.txt","w",encoding="utf-8").write(summary.strip()+"\n")
-          open("work/full.txt","w",encoding="utf-8").write(full.strip()+"\n")
-          open("work/content_tiktok.txt","w",encoding="utf-8").write(content_tiktok.strip()+"\n")
+          open("work/story_slug.txt","w",encoding="utf-8").write(story_slug.strip()+"\n")
+          open("work/chapters.txt","w",encoding="utf-8").write("\n".join(chapters) + "\n")
           open("work/bg_tiktok.txt","w",encoding="utf-8").write(bg_tt.strip()+"\n")
           open("work/bg_youtube.txt","w",encoding="utf-8").write(bg_yt.strip()+"\n")
           open("work/folder_name.txt","w",encoding="utf-8").write(folder+"\n")
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
-          print("OK")
+          print(f"OK: chapters={len(chapters)}")
           PY
 
       - name: Prepare title + upload.txt + encoded text
@@ -113,7 +127,6 @@ jobs:
           SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
           SHORT="$(cat work/summary_short.txt)"
           TITLE="${DATE} ${SHORT}"
-
           echo "$TITLE" > work/title.txt
 
           cat > work/upload.txt <<EOF
@@ -124,11 +137,11 @@ jobs:
           Summary:
           $SUMMARY_ONELINE
 
-          Full text (YouTube):
-          $(cat work/full.txt)
+          StorySlug:
+          $(cat work/story_slug.txt)
 
-          TikTok text:
-          $(cat work/content_tiktok.txt)
+          Chapters:
+          $(cat work/chapters.txt)
           EOF
 
       - name: Create upload.json
@@ -137,12 +150,11 @@ jobs:
           TITLE="$(cat work/title.txt)"
           FOLDER_NAME="$(cat work/folder_name.txt)"
           SUMMARY="$(cat work/summary.txt)"
-          FULL="$(cat work/full.txt)"
 
+          # Keep json shape compatible with your existing API (remove content_ja)
           jq -n \
             --arg title "$TITLE" \
             --arg description_ja "$SUMMARY" \
-            --arg content_ja "$FULL" \
             --arg url "/stories/${FOLDER_NAME}" \
             '{
               title: $title,
@@ -156,8 +168,8 @@ jobs:
           name: work_inputs
           path: |
             work/summary.txt
-            work/full.txt
-            work/content_tiktok.txt
+            work/story_slug.txt
+            work/chapters.txt
             work/bg_tiktok.txt
             work/bg_youtube.txt
             work/folder_name.txt
@@ -221,7 +233,7 @@ jobs:
             work/background_youtube.jpg
 
   tts:
-    name: Generate TTS (TikTok + YouTube)
+    name: Generate TTS from chapters (TikTok + YouTube)
     runs-on: ubuntu-latest
     needs: [prepare]
     steps:
@@ -230,38 +242,86 @@ jobs:
           name: work_inputs
           path: work
 
-      - name: Install ffmpeg
+      - name: Install ffmpeg + jq + curl
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq
+          sudo apt-get install -y ffmpeg jq curl python3
 
-      - name: Generate TTS for TikTok (mp3) + validate
+      - name: Fetch chapter contents -> per-chapter TTS mp3 -> concat
         run: |
           set -euo pipefail
           VOICE="$(cat work/voice.txt)"
+          STORY_SLUG="$(cat work/story_slug.txt)"
 
-          curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
-            -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg text "$(cat work/content_tiktok.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
-            --output work/tts_tiktok.mp3
+          mkdir -p work/chapters_text work/chapters_audio
+
+          i=0
+          while IFS= read -r CH; do
+            [ -n "$CH" ] || continue
+            i=$((i+1))
+            IDX=$(printf "%03d" "$i")
+            echo "==> [$IDX] slug=$CH"
+
+            URL="https://docxiu.net/api/chapters/contents?slug=${CH}&storySlug=${STORY_SLUG}"
+            curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 60 \
+              "$URL" -o "work/chapters_text/${IDX}.json"
+
+            # Extract text from JSON (try multiple keys)
+            python3 - "$IDX" <<'PY'
+import json, sys
+idx=sys.argv[1]
+p=f"work/chapters_text/{idx}.json"
+data=json.load(open(p, "r", encoding="utf-8"))
+
+def pick_text(obj):
+  if isinstance(obj, str) and obj.strip():
+    return obj.strip()
+  return ""
+
+text = ""
+if isinstance(data, dict):
+  for k in ["content", "text", "body", "chapterContent"]:
+    text = pick_text(data.get(k))
+    if text: break
+  if (not text) and isinstance(data.get("data"), dict):
+    for k in ["content", "text", "body"]:
+      text = pick_text(data["data"].get(k))
+      if text: break
+
+if not text:
+  raise SystemExit(f"No content text found in JSON for idx={idx}")
+
+open(f"work/chapters_text/{idx}.txt", "w", encoding="utf-8").write(text + "\n")
+print(f"OK text idx={idx}, chars={len(text)}")
+PY
+
+            # Generate TTS mp3 per chapter
+            curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
+              -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg text "$(cat work/chapters_text/${IDX}.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
+              --output "work/chapters_audio/${IDX}.mp3"
+
+            ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "work/chapters_audio/${IDX}.mp3" >/dev/null
+            ls -lh "work/chapters_audio/${IDX}.mp3"
+          done < work/chapters.txt
+
+          test "$i" -ge 1
+
+          # TikTok: first chapter only
+          cp "work/chapters_audio/001.mp3" work/tts_tiktok.mp3
+
+          # YouTube: concat all chapters
+          rm -f work/concat_list.txt
+          for f in work/chapters_audio/*.mp3; do
+            echo "file '$(realpath "$f")'" >> work/concat_list.txt
+          done
+
+          # Try stream copy concat; if fails in your env, switch to re-encode.
+          ffmpeg -y -f concat -safe 0 -i work/concat_list.txt -c copy work/tts_youtube.mp3
 
           ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_tiktok.mp3 >/dev/null
-          ls -lh work/tts_tiktok.mp3
-
-      - name: Generate TTS for YouTube (mp3) + validate
-        run: |
-          set -euo pipefail
-          VOICE="$(cat work/voice.txt)"
-
-          curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
-            -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg text "$(cat work/full.txt)" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
-            --output work/tts_youtube.mp3
-
           ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tts_youtube.mp3 >/dev/null
-          ls -lh work/tts_youtube.mp3
 
       - name: Upload artifact (tts)
         uses: actions/upload-artifact@v4
@@ -270,6 +330,8 @@ jobs:
           path: |
             work/tts_tiktok.mp3
             work/tts_youtube.mp3
+            work/concat_list.txt
+            work/chapters_text/*.txt
 
   render:
     name: Render loop videos (chromium)
@@ -651,3 +713,5 @@ jobs:
             work/youtube.mp4
             work/background_tiktok.jpg
             work/background_youtube.jpg
+            work/concat_list.txt
+            work/chapters_text/*.txt
