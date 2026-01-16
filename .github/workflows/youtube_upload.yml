@@ -25,7 +25,7 @@ jobs:
   download:
     runs-on: ubuntu-latest
     env:
-      # Dùng bộ YT_* làm OAuth để tải Drive (refresh token PHẢI có drive.readonly scope)
+      # OAuth để tải Drive (refresh token cần drive.readonly scope)
       GOOGLE_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -140,8 +140,7 @@ jobs:
           ls -lah out
           file out/video.mp4 || true
 
-      # ✅ NEW: Trim to Shorts length if requested
-      - name: Trim video if mode=short (< 180s)
+      - name: Trim video if mode=short (<= 179s)
         if: ${{ inputs.video_mode == 'short' }}
         run: |
           set -euo pipefail
@@ -149,21 +148,18 @@ jobs:
 
           IN="out/video.mp4"
           OUT="out/video_trim.mp4"
+          TRIM_SEC="179"
 
-          echo "Trimming to 170 seconds for Shorts..."
-          # Try fast path (no re-encode)
-          if ffmpeg -hide_banner -y -i "$IN" -t 170 -c copy "$OUT"; then
-            mv -f "$OUT" "$IN"
-            echo "Trimmed (stream copy) -> $IN"
-          else
-            echo "Stream copy failed; fallback to re-encode..."
-            ffmpeg -hide_banner -y -i "$IN" -t 170 -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "$OUT"
-            mv -f "$OUT" "$IN"
-            echo "Trimmed (re-encode) -> $IN"
-          fi
+          echo "Trim to ${TRIM_SEC}s for Shorts..."
+          # stream copy first (fast), fallback to re-encode
+          ffmpeg -hide_banner -y -i "$IN" -t "$TRIM_SEC" -c copy "$OUT" || \
+          ffmpeg -hide_banner -y -i "$IN" -t "$TRIM_SEC" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "$OUT"
 
+          mv -f "$OUT" "$IN"
+
+          # show duration
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" || true
           ls -lah out
-          file out/video.mp4 || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -187,100 +183,65 @@ jobs:
           ls -lah out
           file out/video.mp4 || true
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Get access token from refresh token
-        id: token
+      - name: Install deps
+        run: npm i googleapis@^140
+
+      - name: Upload to YouTube (Node stream, no OOM)
         env:
-          CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        run: |
-          set -euo pipefail
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-          RESP=$(curl -sS -X POST https://oauth2.googleapis.com/token \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "client_id=${CLIENT_ID}" \
-            --data-urlencode "client_secret=${CLIENT_SECRET}" \
-            --data-urlencode "refresh_token=${REFRESH_TOKEN}" \
-            --data-urlencode "grant_type=refresh_token")
-
-          echo "$RESP" | jq .
-          ACCESS_TOKEN=$(echo "$RESP" | jq -r '.access_token // empty')
-
-          if [ -z "$ACCESS_TOKEN" ]; then
-            echo "Failed to get access_token"
-            exit 1
-          fi
-
-          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
-
-      - name: Upload to YouTube (resumable)
-        env:
-          YT_ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
           YT_TITLE: ${{ inputs.yt_title }}
           YT_DESCRIPTION: ${{ inputs.yt_description }}
           YT_PRIVACY: ${{ inputs.yt_privacy }}
         run: |
-          set -euo pipefail
+          node <<'NODE'
+          const fs = require("fs");
+          const { google } = require("googleapis");
 
-          YT_PRIVACY="${YT_PRIVACY:-private}"
-          YT_PRIVACY="$(echo "$YT_PRIVACY" | tr '[:upper:]' '[:lower:]')"
-          if [[ "$YT_PRIVACY" != "private" && "$YT_PRIVACY" != "unlisted" && "$YT_PRIVACY" != "public" ]]; then
-            echo "Invalid yt_privacy: $YT_PRIVACY"
-            exit 1
-          fi
+          async function main() {
+            let privacy = (process.env.YT_PRIVACY || "private").toLowerCase();
+            if (!["private", "unlisted", "public"].includes(privacy)) {
+              throw new Error(`Invalid yt_privacy: ${privacy}`);
+            }
 
-          VIDEO_PATH="out/video.mp4"
-          if [ ! -f "$VIDEO_PATH" ]; then
-            echo "Video not found at $VIDEO_PATH"
-            exit 1
-          fi
+            const oauth2 = new google.auth.OAuth2(
+              process.env.YT_CLIENT_ID,
+              process.env.YT_CLIENT_SECRET
+            );
+            oauth2.setCredentials({ refresh_token: process.env.YT_REFRESH_TOKEN });
 
-          FILE_SIZE=$(wc -c < "$VIDEO_PATH" | tr -d ' ')
-          echo "File size: $FILE_SIZE bytes"
+            const youtube = google.youtube({ version: "v3", auth: oauth2 });
 
-          curl -sS -D /tmp/yt_init_headers.txt -o /tmp/yt_init_body.json \
-            -X POST \
-            -H "Authorization: Bearer ${YT_ACCESS_TOKEN}" \
-            -H "Content-Type: application/json; charset=UTF-8" \
-            -H "X-Upload-Content-Length: ${FILE_SIZE}" \
-            -H "X-Upload-Content-Type: video/*" \
-            "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status" \
-            -d "$(jq -n \
-              --arg title "$YT_TITLE" \
-              --arg desc "$YT_DESCRIPTION" \
-              --arg privacy "$YT_PRIVACY" \
-              '{snippet:{title:$title,description:$desc,categoryId:"22"},status:{privacyStatus:$privacy}}' \
-            )"
+            const videoPath = "out/video.mp4";
+            if (!fs.existsSync(videoPath)) throw new Error(`Video not found: ${videoPath}`);
 
-          UPLOAD_URL=$(grep -i '^Location:' /tmp/yt_init_headers.txt | awk '{print $2}' | tr -d '\r')
-          if [ -z "${UPLOAD_URL:-}" ]; then
-            echo "Failed to get resumable upload URL"
-            echo "Init response headers:"
-            cat /tmp/yt_init_headers.txt || true
-            echo "Init response body:"
-            cat /tmp/yt_init_body.json || true
-            exit 1
-          fi
+            const res = await youtube.videos.insert({
+              part: ["snippet", "status"],
+              notifySubscribers: false,
+              requestBody: {
+                snippet: {
+                  title: process.env.YT_TITLE,
+                  description: process.env.YT_DESCRIPTION,
+                  categoryId: "22",
+                },
+                status: { privacyStatus: privacy },
+              },
+              media: { body: fs.createReadStream(videoPath) },
+            });
 
-          HTTP_CODE=$(curl -sS -o /tmp/yt_upload_resp.json -w "%{http_code}" \
-            -X PUT \
-            -H "Authorization: Bearer ${YT_ACCESS_TOKEN}" \
-            -H "Content-Length: ${FILE_SIZE}" \
-            -H "Content-Type: video/*" \
-            --data-binary @"${VIDEO_PATH}" \
-            "${UPLOAD_URL}")
+            console.log("Uploaded video ID:", res.data.id);
+            console.log("URL:", `https://www.youtube.com/watch?v=${res.data.id}`);
+          }
 
-          echo "Upload HTTP status: $HTTP_CODE"
-          cat /tmp/yt_upload_resp.json || true
-
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            echo "Upload failed."
-            exit 1
-          fi
-
-          VIDEO_ID=$(jq -r '.id // empty' /tmp/yt_upload_resp.json)
-          echo "Uploaded video id: ${VIDEO_ID}"
-          echo "Video URL: https://www.youtube.com/watch?v=${VIDEO_ID}"
+          main().catch((e) => {
+            console.error(e);
+            process.exit(1);
+          });
+          NODE
