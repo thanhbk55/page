@@ -1,4 +1,4 @@
-name: GDrive download test
+name: GDrive -> YouTube (download & upload)
 
 on:
   workflow_dispatch:
@@ -6,12 +6,25 @@ on:
       gdrive_rel_path:
         description: "Relative path inside Drive folder (e.g. folder-a/video.mp4)"
         required: true
+      yt_title:
+        description: "YouTube title"
+        required: true
+      yt_description:
+        description: "YouTube description"
+        required: true
+      yt_access_token:
+        description: "YouTube OAuth access_token (must include youtube.upload scope)"
+        required: true
+      yt_privacy:
+        description: "private|unlisted|public"
+        required: false
+        default: "private"
 
 jobs:
   download:
     runs-on: ubuntu-latest
     env:
-      # Dùng bộ YT_* làm OAuth (token PHẢI có drive.readonly scope)
+      # Dùng bộ YT_* làm OAuth để tải Drive (refresh token PHẢI có drive.readonly scope)
       GOOGLE_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -84,7 +97,6 @@ jobs:
           async function main() {
             let currentFolderId = rootFolderId;
 
-            // Walk through folders in path
             for (let i = 0; i < parts.length - 1; i++) {
               const folderName = parts[i];
               const folder = await findChild(
@@ -92,9 +104,7 @@ jobs:
                 folderName,
                 "application/vnd.google-apps.folder"
               );
-              if (!folder) {
-                throw new Error(`Folder not found: ${folderName}`);
-              }
+              if (!folder) throw new Error(`Folder not found: ${folderName}`);
               currentFolderId = folder.id;
             }
 
@@ -128,3 +138,92 @@ jobs:
         run: |
           ls -lah out
           file out/video.mp4 || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-file
+          path: out/video.mp4
+
+  upload:
+    runs-on: ubuntu-latest
+    needs: download
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: video-file
+          path: out
+
+      - name: Verify artifact
+        run: |
+          ls -lah out
+          file out/video.mp4 || true
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Upload to YouTube (resumable)
+        env:
+          YT_ACCESS_TOKEN: ${{ inputs.yt_access_token }}
+          YT_TITLE: ${{ inputs.yt_title }}
+          YT_DESCRIPTION: ${{ inputs.yt_description }}
+          YT_PRIVACY: ${{ inputs.yt_privacy }}
+        run: |
+          set -euo pipefail
+
+          VIDEO_PATH="out/video.mp4"
+          if [ ! -f "$VIDEO_PATH" ]; then
+            echo "Video not found at $VIDEO_PATH"
+            exit 1
+          fi
+
+          FILE_SIZE=$(wc -c < "$VIDEO_PATH" | tr -d ' ')
+          echo "File size: $FILE_SIZE bytes"
+
+          # 1) Initiate resumable upload session
+          curl -sS -D /tmp/yt_init_headers.txt -o /tmp/yt_init_body.json \
+            -X POST \
+            -H "Authorization: Bearer ${YT_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json; charset=UTF-8" \
+            -H "X-Upload-Content-Length: ${FILE_SIZE}" \
+            -H "X-Upload-Content-Type: video/*" \
+            "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status" \
+            -d "$(jq -n \
+              --arg title "$YT_TITLE" \
+              --arg desc "$YT_DESCRIPTION" \
+              --arg privacy "$YT_PRIVACY" \
+              '{snippet:{title:$title,description:$desc,categoryId:"22"},status:{privacyStatus:$privacy}}' \
+            )"
+
+          UPLOAD_URL=$(grep -i '^Location:' /tmp/yt_init_headers.txt | awk '{print $2}' | tr -d '\r')
+          if [ -z "${UPLOAD_URL:-}" ]; then
+            echo "Failed to get resumable upload URL"
+            echo "Init response body:"
+            cat /tmp/yt_init_body.json || true
+            exit 1
+          fi
+
+          echo "Resumable URL acquired."
+
+          # 2) Upload the media bytes
+          HTTP_CODE=$(curl -sS -o /tmp/yt_upload_resp.json -w "%{http_code}" \
+            -X PUT \
+            -H "Authorization: Bearer ${YT_ACCESS_TOKEN}" \
+            -H "Content-Length: ${FILE_SIZE}" \
+            -H "Content-Type: video/*" \
+            --data-binary @"${VIDEO_PATH}" \
+            "${UPLOAD_URL}")
+
+          echo "Upload HTTP status: $HTTP_CODE"
+          cat /tmp/yt_upload_resp.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "Upload failed."
+            exit 1
+          fi
+
+          VIDEO_ID=$(jq -r '.id // empty' /tmp/yt_upload_resp.json)
+          echo "Uploaded video id: ${VIDEO_ID}"
+          echo "Video URL: https://www.youtube.com/watch?v=${VIDEO_ID}"
