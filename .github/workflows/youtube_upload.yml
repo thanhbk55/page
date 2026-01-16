@@ -141,7 +141,7 @@ jobs:
           file out/video.mp4 || true
 
       # ✅ NEW: Trim to Shorts length if requested
-      - name: Trim video if mode=short (<= 180s)
+      - name: Trim video if mode=short (< 180s)
         if: ${{ inputs.video_mode == 'short' }}
         run: |
           set -euo pipefail
@@ -150,14 +150,14 @@ jobs:
           IN="out/video.mp4"
           OUT="out/video_trim.mp4"
 
-          echo "Trimming to 180 seconds for Shorts..."
+          echo "Trimming to 170 seconds for Shorts..."
           # Try fast path (no re-encode)
-          if ffmpeg -hide_banner -y -i "$IN" -t 180 -c copy "$OUT"; then
+          if ffmpeg -hide_banner -y -i "$IN" -t 170 -c copy "$OUT"; then
             mv -f "$OUT" "$IN"
             echo "Trimmed (stream copy) -> $IN"
           else
             echo "Stream copy failed; fallback to re-encode..."
-            ffmpeg -hide_banner -y -i "$IN" -t 180 -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "$OUT"
+            ffmpeg -hide_banner -y -i "$IN" -t 170 -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "$OUT"
             mv -f "$OUT" "$IN"
             echo "Trimmed (re-encode) -> $IN"
           fi
