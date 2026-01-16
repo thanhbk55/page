@@ -16,7 +16,7 @@ jobs:
       GOOGLE_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-      GDRIVE_FOLDER_ID: "PUT_YOUR_GDRIVE_FOLDER_ID_HERE"
+      GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
       OUT_PATH: "out/video.mp4"
 
     steps:
