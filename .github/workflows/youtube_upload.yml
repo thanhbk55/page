@@ -2,19 +2,22 @@ name: GDrive download test
 
 on:
   workflow_dispatch:
+    inputs:
+      gdrive_rel_path:
+        description: "Relative path inside Drive folder (e.g. folder-a/video.mp4)"
+        required: true
 
 jobs:
   download:
     runs-on: ubuntu-latest
     env:
-      # Dùng luôn bộ YT_* của bạn làm OAuth cho Drive (chỉ OK nếu refresh token có Drive scope)
+      # Dùng bộ YT_* làm OAuth (token PHẢI có drive.readonly scope)
       GOOGLE_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-      GDRIVE_FOLDER_ID:  ${{ secrets.GDRIVE_FOLDER_ID }}
-      GDRIVE_REL_PATH: "sau-khi-ket-hon-bi-mat-voi-ong-trum-tra-xanh-thay-toi-lam-vo/tiktok.mp4"
-      OUT_PATH: "out/tiktok.mp4"
+      GDRIVE_FOLDER_ID: "PUT_YOUR_GDRIVE_FOLDER_ID_HERE"
+      OUT_PATH: "out/video.mp4"
 
     steps:
       - name: Checkout
@@ -25,10 +28,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install deps (googleapis)
+      - name: Install deps
         run: npm i googleapis@^140
 
       - name: Download from Google Drive
+        env:
+          GDRIVE_REL_PATH: ${{ inputs.gdrive_rel_path }}
         run: |
           node <<'NODE'
           const fs = require("fs");
@@ -41,21 +46,22 @@ jobs:
 
           const rootFolderId = process.env.GDRIVE_FOLDER_ID;
           const relPath = process.env.GDRIVE_REL_PATH;
-          const outPath = process.env.OUT_PATH || "out/file.bin";
+          const outPath = process.env.OUT_PATH || "out/video.mp4";
 
-          if (!clientId || !clientSecret || !refreshToken) throw new Error("Missing GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN");
+          if (!clientId || !clientSecret || !refreshToken) {
+            throw new Error("Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN");
+          }
           if (!rootFolderId) throw new Error("Missing GDRIVE_FOLDER_ID");
-          if (!relPath) throw new Error("Missing GDRIVE_REL_PATH");
+          if (!relPath) throw new Error("Missing gdrive_rel_path input");
 
           const parts = relPath.split("/").filter(Boolean);
-          if (parts.length < 1) throw new Error("Invalid GDRIVE_REL_PATH");
+          if (parts.length < 1) throw new Error("Invalid gdrive_rel_path");
 
           const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
           oauth2.setCredentials({ refresh_token: refreshToken });
           const drive = google.drive({ version: "v3", auth: oauth2 });
 
           async function findChild(parentId, name, mimeType) {
-            // Escape single quotes in name for Drive query
             const safeName = name.replace(/'/g, "\\'");
             const q = [
               `'${parentId}' in parents`,
@@ -78,17 +84,23 @@ jobs:
           async function main() {
             let currentFolderId = rootFolderId;
 
-            // Walk folders: all parts except last are folder names
+            // Walk through folders in path
             for (let i = 0; i < parts.length - 1; i++) {
               const folderName = parts[i];
-              const folder = await findChild(currentFolderId, folderName, "application/vnd.google-apps.folder");
-              if (!folder) throw new Error(`Folder not found under ${currentFolderId}: ${folderName}`);
+              const folder = await findChild(
+                currentFolderId,
+                folderName,
+                "application/vnd.google-apps.folder"
+              );
+              if (!folder) {
+                throw new Error(`Folder not found: ${folderName}`);
+              }
               currentFolderId = folder.id;
             }
 
             const fileName = parts[parts.length - 1];
             const file = await findChild(currentFolderId, fileName, null);
-            if (!file) throw new Error(`File not found under ${currentFolderId}: ${fileName}`);
+            if (!file) throw new Error(`File not found: ${fileName}`);
 
             fs.mkdirSync(path.dirname(outPath), { recursive: true });
             const dest = fs.createWriteStream(outPath);
@@ -115,10 +127,4 @@ jobs:
       - name: Verify file
         run: |
           ls -lah out
-          file out/tiktok.mp4 || true
-
-      - name: Upload artifact (optional)
-        uses: actions/upload-artifact@v4
-        with:
-          name: downloaded-video
-          path: out/tiktok.mp4
+          file out/video.mp4 || true
