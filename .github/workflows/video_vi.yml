@@ -109,6 +109,8 @@ jobs:
           open("work/bg_youtube.txt","w",encoding="utf-8").write(bg_yt.strip()+"\n")
           open("work/folder_name.txt","w",encoding="utf-8").write(folder+"\n")
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
+          # NEW: intro TTS text
+          open("work/intro_tts.txt","w",encoding="utf-8").write("Mời bạn lắng nghe truyện audio cùng Đọc Xíu nhé.\n")
           print(f"OK: chapters={len(chapters)}")
           PY
 
@@ -181,6 +183,7 @@ jobs:
             work/title.txt
             work/upload.txt
             work/upload.json
+            work/intro_tts.txt
 
   backgrounds:
     name: Download backgrounds
@@ -257,6 +260,17 @@ jobs:
           STORY_SLUG="$(cat work/story_slug.txt)"
 
           mkdir -p work/chapters_text work/chapters_audio
+          # NEW: Intro TTS
+          INTRO_TEXT="$(cat work/intro_tts.txt)"
+          
+          curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 300 \
+            -X POST "https://mcp-xiaozhi.vercel.app/api/tts/stream" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$INTRO_TEXT" --arg voice "$VOICE" --arg format "mp3" '{text:$text, voice:$voice, format:$format}')" \
+            --output "work/chapters_audio/000_intro.mp3"
+          
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 \
+            "work/chapters_audio/000_intro.mp3" >/dev/null
 
           # Create extractor script ONCE (no heredoc issues)
           python3 - <<'PY'
@@ -317,10 +331,19 @@ jobs:
 
           test "$i" -ge 1
 
-          cp "work/chapters_audio/001.mp3" work/tts_tiktok.mp3
+          # NEW: TikTok audio = intro + chapter 1
+          ffmpeg -y \
+            -i work/chapters_audio/000_intro.mp3 \
+            -i work/chapters_audio/001.mp3 \
+            -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1" \
+            -c:a libmp3lame -b:a 192k \
+            work/tts_tiktok.mp3
 
           rm -f work/concat_list.txt
-          for f in work/chapters_audio/*.mp3; do
+
+          # NEW: YouTube audio = intro + all chapters in order
+          echo "file '$(realpath work/chapters_audio/000_intro.mp3)'" >> work/concat_list.txt
+          for f in work/chapters_audio/[0-9][0-9][0-9].mp3; do
             echo "file '$(realpath "$f")'" >> work/concat_list.txt
           done
 
