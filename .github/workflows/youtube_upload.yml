@@ -1,0 +1,124 @@
+name: GDrive download test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    env:
+      # Dùng luôn bộ YT_* của bạn làm OAuth cho Drive (chỉ OK nếu refresh token có Drive scope)
+      GOOGLE_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+
+      GDRIVE_FOLDER_ID:  ${{ secrets.GDRIVE_FOLDER_ID }}
+      GDRIVE_REL_PATH: "sau-khi-ket-hon-bi-mat-voi-ong-trum-tra-xanh-thay-toi-lam-vo/tiktok.mp4"
+      OUT_PATH: "out/tiktok.mp4"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps (googleapis)
+        run: npm i googleapis@^140
+
+      - name: Download from Google Drive
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const { google } = require("googleapis");
+
+          const clientId = process.env.GOOGLE_CLIENT_ID;
+          const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+          const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+          const rootFolderId = process.env.GDRIVE_FOLDER_ID;
+          const relPath = process.env.GDRIVE_REL_PATH;
+          const outPath = process.env.OUT_PATH || "out/file.bin";
+
+          if (!clientId || !clientSecret || !refreshToken) throw new Error("Missing GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN");
+          if (!rootFolderId) throw new Error("Missing GDRIVE_FOLDER_ID");
+          if (!relPath) throw new Error("Missing GDRIVE_REL_PATH");
+
+          const parts = relPath.split("/").filter(Boolean);
+          if (parts.length < 1) throw new Error("Invalid GDRIVE_REL_PATH");
+
+          const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
+          oauth2.setCredentials({ refresh_token: refreshToken });
+          const drive = google.drive({ version: "v3", auth: oauth2 });
+
+          async function findChild(parentId, name, mimeType) {
+            // Escape single quotes in name for Drive query
+            const safeName = name.replace(/'/g, "\\'");
+            const q = [
+              `'${parentId}' in parents`,
+              `name = '${safeName}'`,
+              "trashed = false",
+              mimeType ? `mimeType = '${mimeType}'` : null,
+            ].filter(Boolean).join(" and ");
+
+            const res = await drive.files.list({
+              q,
+              fields: "files(id,name,mimeType)",
+              pageSize: 10,
+              supportsAllDrives: true,
+              includeItemsFromAllDrives: true,
+            });
+
+            return res.data.files?.[0] || null;
+          }
+
+          async function main() {
+            let currentFolderId = rootFolderId;
+
+            // Walk folders: all parts except last are folder names
+            for (let i = 0; i < parts.length - 1; i++) {
+              const folderName = parts[i];
+              const folder = await findChild(currentFolderId, folderName, "application/vnd.google-apps.folder");
+              if (!folder) throw new Error(`Folder not found under ${currentFolderId}: ${folderName}`);
+              currentFolderId = folder.id;
+            }
+
+            const fileName = parts[parts.length - 1];
+            const file = await findChild(currentFolderId, fileName, null);
+            if (!file) throw new Error(`File not found under ${currentFolderId}: ${fileName}`);
+
+            fs.mkdirSync(path.dirname(outPath), { recursive: true });
+            const dest = fs.createWriteStream(outPath);
+
+            const res = await drive.files.get(
+              { fileId: file.id, alt: "media", supportsAllDrives: true },
+              { responseType: "stream" }
+            );
+
+            await new Promise((resolve, reject) => {
+              res.data.on("end", resolve).on("error", reject).pipe(dest);
+            });
+
+            console.log("Downloaded OK:", outPath);
+            console.log("Drive fileId:", file.id);
+          }
+
+          main().catch((e) => {
+            console.error(e);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Verify file
+        run: |
+          ls -lah out
+          file out/tiktok.mp4 || true
+
+      - name: Upload artifact (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-video
+          path: out/tiktok.mp4
