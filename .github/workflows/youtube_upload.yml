@@ -1,4 +1,4 @@
-name: GDrive -> YouTube (download & upload)
+name: YouTube Upload
 
 on:
   workflow_dispatch:
@@ -11,9 +11,6 @@ on:
         required: true
       yt_description:
         description: "YouTube description"
-        required: true
-      yt_access_token:
-        description: "YouTube OAuth access_token (must include youtube.upload scope)"
         required: true
       yt_privacy:
         description: "private|unlisted|public"
@@ -97,6 +94,7 @@ jobs:
           async function main() {
             let currentFolderId = rootFolderId;
 
+            // Walk folders
             for (let i = 0; i < parts.length - 1; i++) {
               const folderName = parts[i];
               const folder = await findChild(
@@ -164,14 +162,48 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Get access token from refresh token
+        id: token
+        env:
+          CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          RESP=$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=${CLIENT_ID}" \
+            --data-urlencode "client_secret=${CLIENT_SECRET}" \
+            --data-urlencode "refresh_token=${REFRESH_TOKEN}" \
+            --data-urlencode "grant_type=refresh_token")
+
+          echo "$RESP" | jq .
+          ACCESS_TOKEN=$(echo "$RESP" | jq -r '.access_token // empty')
+
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access_token"
+            exit 1
+          fi
+
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+
       - name: Upload to YouTube (resumable)
         env:
-          YT_ACCESS_TOKEN: ${{ inputs.yt_access_token }}
+          YT_ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
           YT_TITLE: ${{ inputs.yt_title }}
           YT_DESCRIPTION: ${{ inputs.yt_description }}
           YT_PRIVACY: ${{ inputs.yt_privacy }}
         run: |
           set -euo pipefail
+
+          # Normalize + fallback privacy
+          YT_PRIVACY="${YT_PRIVACY:-private}"
+          YT_PRIVACY="$(echo "$YT_PRIVACY" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$YT_PRIVACY" != "private" && "$YT_PRIVACY" != "unlisted" && "$YT_PRIVACY" != "public" ]]; then
+            echo "Invalid yt_privacy: $YT_PRIVACY"
+            exit 1
+          fi
 
           VIDEO_PATH="out/video.mp4"
           if [ ! -f "$VIDEO_PATH" ]; then
@@ -181,6 +213,7 @@ jobs:
 
           FILE_SIZE=$(wc -c < "$VIDEO_PATH" | tr -d ' ')
           echo "File size: $FILE_SIZE bytes"
+          echo "Token prefix: ${YT_ACCESS_TOKEN:0:4}"
 
           # 1) Initiate resumable upload session
           curl -sS -D /tmp/yt_init_headers.txt -o /tmp/yt_init_body.json \
@@ -200,6 +233,8 @@ jobs:
           UPLOAD_URL=$(grep -i '^Location:' /tmp/yt_init_headers.txt | awk '{print $2}' | tr -d '\r')
           if [ -z "${UPLOAD_URL:-}" ]; then
             echo "Failed to get resumable upload URL"
+            echo "Init response headers:"
+            cat /tmp/yt_init_headers.txt || true
             echo "Init response body:"
             cat /tmp/yt_init_body.json || true
             exit 1
@@ -217,7 +252,7 @@ jobs:
             "${UPLOAD_URL}")
 
           echo "Upload HTTP status: $HTTP_CODE"
-          cat /tmp/yt_upload_resp.json
+          cat /tmp/yt_upload_resp.json || true
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "Upload failed."
@@ -225,5 +260,10 @@ jobs:
           fi
 
           VIDEO_ID=$(jq -r '.id // empty' /tmp/yt_upload_resp.json)
+          if [ -z "$VIDEO_ID" ]; then
+            echo "Upload succeeded but no video id returned (unexpected)."
+            exit 1
+          fi
+
           echo "Uploaded video id: ${VIDEO_ID}"
           echo "Video URL: https://www.youtube.com/watch?v=${VIDEO_ID}"
