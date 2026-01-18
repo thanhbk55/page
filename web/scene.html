@@ -201,6 +201,10 @@
       color:#111;
     }
 
+    .meta {
+      display: none;
+    }
+
     .player .meta .title{
       font: 850 52px var(--fontCJK);
       letter-spacing: .2px;
@@ -377,7 +381,7 @@
       </div>
 
       <div class="badge" aria-hidden="true">♥</div>
-      <div class="headline">Listen Now</div>
+      <div class="headline" id="ht">Listen Now</div>
 
       <div class="content" id="t">Nội dung hiển thị ở đây…</div>
 
@@ -439,6 +443,10 @@
     const paramText = params.get("text");
     const text = paramText ? decodeURIComponent(paramText) : (tEl.textContent || "").trim();
     tEl.textContent = text;
+    const htEl = document.getElementById("ht");
+    const paramTextTitle = params.get("title");
+    const textTitle = paramTextTitle ? decodeURIComponent(paramTextTitle) : (htEl.textContent || "").trim();
+    htEl.textContent = textTitle;
 
     // Random text animation (chill set)
     const textAnims = ["anim-pop","anim-float","anim-shimmer","anim-pulse"];
