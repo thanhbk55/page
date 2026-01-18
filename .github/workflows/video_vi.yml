@@ -143,21 +143,19 @@ jobs:
           open("work/title_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(title, safe="")+"\n")
           PY
 
-          SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
-          SHORT="$(cat work/summary_short.txt)"
-
           TITLE="$(cat work/title.txt)"
+
           cat > work/upload.txt <<EOF
           Title: $TITLE
           Date: $DATE
           Folder: $(cat work/folder_name.txt)
-
+          
           Summary:
-          $SUMMARY_ONELINE
-
+          $(cat work/summary_oneline.txt)
+          
           StorySlug:
           $(cat work/story_slug.txt)
-
+          
           Chapters:
           $(cat work/chapters.txt)
           EOF
