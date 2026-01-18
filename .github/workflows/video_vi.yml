@@ -134,6 +134,12 @@ jobs:
           TITLE="${DATE} ${SHORT}"
           echo "$TITLE" > work/title.txt
 
+          python3 - <<'PY'
+          import urllib.parse
+          title=open("work/title.txt","r",encoding="utf-8").read().strip()
+          open("work/title_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(title)+"\n")
+          PY
+
           cat > work/upload.txt <<EOF
           Title: $TITLE
           Date: $DATE
@@ -181,6 +187,7 @@ jobs:
             work/voice.txt
             work/summary_encoded.txt
             work/title.txt
+            work/title_encoded.txt
             work/upload.txt
             work/upload.json
             work/intro_tts.txt
@@ -410,6 +417,7 @@ jobs:
         run: |
           set -euo pipefail
           TEXT_ENC="$(cat work/summary_encoded.txt)"
+          TITLE_ENC="$(cat work/title_encoded.txt)"
 
           record_one () {
             MODE="$1"
@@ -423,7 +431,7 @@ jobs:
               cp work/background_tiktok.jpg web/background.jpg
             fi
 
-            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}"
+            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}&title=${TITLE_ENC}"
             echo "URL=$URL"
 
             xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc '
