@@ -40,12 +40,18 @@ on:
         description: "Google Drive OAuth access token (Bearer)"
         required: true
 
+      title:
+        description: "Custom title (optional). If empty, auto-generate from date + summary_short"
+        required: false
+        default: ""
+
 env:
   TZ: Asia/Tokyo
 
   # Pick values from repository_dispatch payload OR workflow_dispatch input
   ACCESS_TOKEN: ${{ github.event.client_payload.access_token || inputs.access_token }}
   SUMMARY: ${{ github.event.client_payload.summary || inputs.summary }}
+  TITLE: ${{ github.event.client_payload.title || inputs.title }}
 
   STORY_SLUG: ${{ github.event.client_payload.storySlug || inputs.storySlug }}
   CHAPTERS: ${{ github.event.client_payload.chapters || inputs.chapters }}
@@ -69,6 +75,7 @@ jobs:
           python3 - <<'PY'
           import os, re
 
+          title = os.environ.get("TITLE") or ""
           summary = os.environ.get("SUMMARY") or ""
           story_slug = os.environ.get("STORY_SLUG") or ""
           chapters_raw = os.environ.get("CHAPTERS") or ""
@@ -109,6 +116,7 @@ jobs:
           open("work/bg_youtube.txt","w",encoding="utf-8").write(bg_yt.strip()+"\n")
           open("work/folder_name.txt","w",encoding="utf-8").write(folder+"\n")
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
+          open("work/title.txt","w",encoding="utf-8").write(title.strip()+"\n")
           # NEW: intro TTS text
           open("work/intro_tts.txt","w",encoding="utf-8").write("Mời bạn lắng nghe truyện audio cùng Đọc Xíu nhé.\n")
           print(f"OK: chapters={len(chapters)}")
@@ -126,20 +134,16 @@ jobs:
           short = (s[:60] + "…") if len(s) > 60 else s
           open("work/summary_oneline.txt","w",encoding="utf-8").write(s+"\n")
           open("work/summary_short.txt","w",encoding="utf-8").write(short+"\n")
-          open("work/summary_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(s)+"\n")
+          open("work/summary_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(s, safe="")+"\n")
           PY
-
-          SUMMARY_ONELINE="$(cat work/summary_oneline.txt)"
-          SHORT="$(cat work/summary_short.txt)"
-          TITLE="${DATE} ${SHORT}"
-          echo "$TITLE" > work/title.txt
 
           python3 - <<'PY'
           import urllib.parse
           title=open("work/title.txt","r",encoding="utf-8").read().strip()
-          open("work/title_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(title)+"\n")
+          open("work/title_encoded.txt","w",encoding="utf-8").write(urllib.parse.quote(title, safe="")+"\n")
           PY
 
+          TITLE="$(cat work/title.txt)"
           cat > work/upload.txt <<EOF
           Title: $TITLE
           Date: $DATE
