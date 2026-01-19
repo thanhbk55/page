@@ -297,6 +297,7 @@ jobs:
           
           # Determine N parts from chapters.txt (we only use COUNT, not slugs)
           N="$(grep -v '^[[:space:]]*$' work/chapters.txt | wc -l | tr -d ' ')"
+          export N
           test "$N" -ge 1
           echo "Split content into N=$N parts"
           
