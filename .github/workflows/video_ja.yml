@@ -125,7 +125,7 @@ jobs:
           open("work/voice.txt","w",encoding="utf-8").write(voice.strip()+"\n")
           open("work/title.txt","w",encoding="utf-8").write(title.strip()+"\n")
           # NEW: intro TTS text
-          open("work/intro_tts.txt","w",encoding="utf-8").write("Mời bạn lắng nghe truyện audio cùng Đọc Xíu nhé.\n")
+          open("work/intro_tts.txt","w",encoding="utf-8").write("これからビーのお話が始まります。どうぞ、ゆっくりお楽しみください。\n")
           print(f"OK: chapters={len(chapters)}")
           PY
 
@@ -454,7 +454,7 @@ jobs:
       - name: Prepare web assets
         run: |
           set -euo pipefail
-          test -s web/scene.html
+          test -s web/scene_ja.html
           cp node_modules/canvas-confetti/dist/confetti.browser.js web/confetti.js
 
       - name: Record loop videos via chromium --app (separate backgrounds)
@@ -475,7 +475,7 @@ jobs:
               cp work/background_tiktok.jpg web/background.jpg
             fi
 
-            URL="file://${GITHUB_WORKSPACE}/web/scene.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}&title=${TITLE_ENC}"
+            URL="file://${GITHUB_WORKSPACE}/web/scene_ja.html?w=${W}&h=${H}&mode=${MODE}&text=${TEXT_ENC}&title=${TITLE_ENC}"
             echo "URL=$URL"
 
             xvfb-run -a -s "-screen 0 1920x1920x24" bash -lc '
