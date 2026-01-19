@@ -186,7 +186,7 @@ jobs:
               description_ja: $description_ja,
               url: $url,
               content: $content
-            }' > work/upload.json
+            }' > work/upload_ja.json
 
       - name: Upload artifact (inputs)
         uses: actions/upload-artifact@v4
@@ -204,7 +204,7 @@ jobs:
             work/title.txt
             work/title_encoded.txt
             work/upload.txt
-            work/upload.json
+            work/upload_ja.json
             work/intro_tts.txt
             work/content.txt
 
@@ -561,7 +561,7 @@ jobs:
             -t "$ADUR_CEIL" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
-            work/tiktok.mp4
+            work/tiktok_ja.mp4
 
       - name: Loop video to match audio + mux audio (YouTube) [bounded]
         run: |
@@ -577,7 +577,7 @@ jobs:
             -t "$ADUR_CEIL" \
             -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart \
-            work/youtube.mp4
+            work/youtube_ja.mp4
 
       - name: Show output file sizes
         run: |
@@ -586,16 +586,16 @@ jobs:
           ls -lh work/*.mp4 work/*.mp3 || true
           echo
           echo "=== Video duration ==="
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tiktok.mp4
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/youtube.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/tiktok_ja.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/youtube_ja.mp4
 
       - name: Upload artifact (final videos)
         uses: actions/upload-artifact@v4
         with:
           name: work_final
           path: |
-            work/tiktok.mp4
-            work/youtube.mp4
+            work/tiktok_ja.mp4
+            work/youtube_ja.mp4
 
   upload:
     name: Upload to Google Drive
@@ -766,9 +766,9 @@ jobs:
             echo "${OUTKEY}_dl=$DL" >> "$GITHUB_OUTPUT"
           }
 
-          upload_one work/tiktok.mp4 tiktok video/mp4
-          upload_one work/youtube.mp4 youtube video/mp4
-          upload_one work/upload.json meta application/json
+          upload_one work/tiktok_ja.mp4 tiktok_ja video/mp4
+          upload_one work/youtube_ja.mp4 youtube_ja video/mp4
+          upload_one work/upload_ja.json meta_ja application/json
 
       - name: Notify API video_story done
         run: |
@@ -786,13 +786,13 @@ jobs:
           name: debug_bundle
           path: |
             work/upload.txt
-            work/upload.json
+            work/upload_ja.json
             work/tts_tiktok.mp3
             work/tts_youtube.mp3
             work/loop_tiktok.mp4
             work/loop_youtube.mp4
-            work/tiktok.mp4
-            work/youtube.mp4
+            work/tiktok_ja.mp4
+            work/youtube_ja.mp4
             work/background_tiktok.jpg
             work/background_youtube.jpg
             work/concat_list.txt
