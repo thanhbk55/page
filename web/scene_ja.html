@@ -1,0 +1,592 @@
+<!doctype html>
+<html translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="google" content="notranslate">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <style>
+    html,body { margin:0; background:#000; overflow:hidden; }
+    canvas { position:fixed; inset:0; width:100vw; height:100vh; }
+
+    .overlay{
+      position:fixed; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      pointer-events:none;
+      padding: 6vh 6vw;
+    }
+
+    /* Mode-driven sizing */
+    :root{
+      --cardW: 84vw;
+      --cardH: 72vh;
+      --radius: 40px;
+
+      --headlineSize: 64px;
+      --textSize: 44px;
+      --pad: 46px;
+
+      --clampLines: 10;
+
+      --progress: 62%;
+      --fontCJK: "Noto Sans JP","Noto Sans CJK JP","Noto Sans", system-ui, -apple-system, sans-serif;
+    }
+
+    /* Premium glass card */
+    .card{
+      position: relative;
+      width: var(--cardW);
+      max-width: 920px;
+
+      height: var(--cardH);
+      max-height: 1400px;
+
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.78);
+      box-shadow: 0 18px 70px rgba(0,0,0,0.30);
+      backdrop-filter: blur(10px);
+
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+
+      padding: var(--pad);
+      overflow:hidden;
+      transform: translateZ(0);
+    }
+
+    /* subtle inner highlight */
+    .card::before{
+      content:"";
+      position:absolute; inset:-2px;
+      border-radius: calc(var(--radius) + 2px);
+      background:
+        radial-gradient(900px 420px at 15% 18%, rgba(255,255,255,0.75), rgba(255,255,255,0) 60%),
+        radial-gradient(700px 420px at 80% 0%, rgba(120,180,170,0.30), rgba(255,255,255,0) 55%),
+        radial-gradient(900px 520px at 80% 110%, rgba(0,0,0,0.10), rgba(255,255,255,0) 55%);
+      pointer-events:none;
+      opacity: 0.9;
+    }
+
+    /* Bee House logo */
+    .logo{
+      position:absolute;
+      top: 24px;
+      left: 24px;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+      backdrop-filter: blur(10px);
+
+      font: 700 22px var(--fontCJK);
+      color: rgba(0,0,0,0.78);
+      letter-spacing: .3px;
+      opacity: 0.92;
+    }
+    .logo .mark{
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: rgba(120,180,170,0.25);
+      border: 1px solid rgba(0,0,0,0.06);
+      font-size: 18px;
+    }
+    @keyframes logoBreath{
+      0%{ transform: translateY(0); }
+      50%{ transform: translateY(-2px); }
+      100%{ transform: translateY(0); }
+    }
+    .logo{ animation: logoBreath 4.8s ease-in-out infinite; }
+
+    .logo .name{
+      display:flex;
+      align-items:baseline;
+      gap:6px;
+      line-height:1;
+    }
+
+    /* Bee */
+    .logo .bee-word{
+      font-family: system-ui, -apple-system, "Noto Sans", sans-serif;
+      font-weight: 900;
+      font-size: 22px;
+      letter-spacing: 0.4px;
+      color: #F5B301; /* honey */
+      text-shadow:
+        0 1px 0 rgba(255,255,255,0.6),
+        0 2px 6px rgba(245,179,1,0.35);
+    }
+
+    /* House */
+    .logo .house-word{
+      font-family: system-ui, -apple-system, "Noto Sans", sans-serif;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: 0.2px;
+      color: #d63b35;
+    }
+
+
+    /* Badge */
+    .badge{
+      position:absolute;
+      top: 24px;
+      right: 24px;
+
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+
+      background:#d63b35;
+      color:#fff;
+      font-size: 44px;
+      font-weight: 800;
+      line-height: 1;
+
+      box-shadow: 0 16px 40px rgba(214,59,53,0.30);
+      transform: translateZ(0);
+    }
+    @keyframes badgePulse{
+      0%{ transform: scale(1); }
+      50%{ transform: scale(1.03); }
+      100%{ transform: scale(1); }
+    }
+    .badge{ animation: badgePulse 3.6s ease-in-out infinite; }
+
+    .headline{
+      font: 650 var(--headlineSize) var(--fontCJK);
+      letter-spacing: 0.2px;
+      color:#111;
+      margin-bottom: 18px;
+      opacity: 0.94;
+      margin-top: 34px;
+    }
+
+    .content{
+      width: 100%;
+      color:#111;
+      font: 750 var(--textSize) var(--fontCJK);
+      text-align:center;
+      line-height:1.34;
+
+      display:-webkit-box;
+      -webkit-line-clamp: var(--clampLines);
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+
+      will-change: transform, filter, opacity;
+      transform: translateZ(0);
+    }
+
+    /* Fake audio player UI */
+    .player{
+      width: 100%;
+      margin-top: 34px;
+      padding-top: 26px;
+      border-top: 2px solid rgba(0,0,0,0.08);
+      color:#111;
+    }
+
+    .meta {
+      display: none;
+    }
+
+    .player .meta .title{
+      font: 850 52px var(--fontCJK);
+      letter-spacing: .2px;
+    }
+    .player .meta .sub{
+      margin-top: 10px;
+      font: 750 38px var(--fontCJK);
+      color: rgba(0,0,0,0.55);
+    }
+
+    .progress{
+      margin-top: 22px;
+      display:flex;
+      align-items:center;
+      gap: 18px;
+    }
+
+    .time{
+      font: 650 28px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(0,0,0,0.6);
+      min-width: 92px;
+      text-align:center;
+    }
+
+    .bar{
+      position: relative;
+      flex: 1;
+      height: 7px;
+      background: rgba(0,0,0,0.14);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .bar::before{
+      content:"";
+      position:absolute;
+      left:0; top:0; bottom:0;
+      width: var(--progress, 62%);
+      background: rgba(0,0,0,0.68);
+      border-radius: 999px;
+    }
+
+    .dot{
+      position:absolute;
+      left: var(--progress, 62%);
+      top: 50%;
+      transform: translate(-50%,-50%);
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.85);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.20);
+    }
+
+    .controls{
+      margin-top: 26px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 20px;
+    }
+
+    .btn{
+      width: 88px;
+      height: 88px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font: 800 34px var(--fontCJK);
+      color:#111;
+      background: rgba(0,0,0,0.06);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+      transform: translateZ(0);
+    }
+
+    .btn.big{
+      width: 112px;
+      height: 112px;
+      font-size: 46px;
+      background: rgba(0,0,0,0.10);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.14), inset 0 0 0 1px rgba(0,0,0,0.06);
+    }
+    @keyframes playBreath{
+      0%{ transform: scale(1); }
+      50%{ transform: scale(1.03); }
+      100%{ transform: scale(1); }
+    }
+    .btn.big{ animation: playBreath 2.8s ease-in-out infinite; }
+
+    /* Random text animations (apply to .content) */
+    @keyframes popIn {
+      0% { transform: scale(.975); opacity:0; filter: blur(2px); }
+      100% { transform: scale(1); opacity:1; filter: blur(0); }
+    }
+    @keyframes floaty {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+      100% { transform: translateY(0); }
+    }
+    @keyframes shimmer {
+      0% { filter: brightness(1); }
+      50% { filter: brightness(1.08); }
+      100% { filter: brightness(1); }
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.015); }
+      100% { transform: scale(1); }
+    }
+
+    .anim-pop { animation: popIn 700ms ease-out both; }
+    .anim-float { animation: popIn 700ms ease-out both, floaty 2600ms ease-in-out infinite; }
+    .anim-shimmer { animation: popIn 700ms ease-out both, shimmer 2600ms ease-in-out infinite; }
+    .anim-pulse { animation: popIn 700ms ease-out both, pulse 2400ms ease-in-out infinite; }
+  </style>
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="overlay">
+    <div class="card">
+      <div class="logo" aria-hidden="true">
+        <span class="mark">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 64 64"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <!-- Wings -->
+            <path
+              d="M22 24
+                C10 14, 2 26, 10 36
+                C16 42, 26 36, 26 30
+                C24 28, 23 26, 22 24 Z"
+              fill="rgba(255,200,80,0.55)"
+            />
+            <path
+              d="M42 24
+                C54 14, 62 26, 54 36
+                C48 42, 38 36, 38 30
+                C40 28, 41 26, 42 24 Z"
+              fill="rgba(255,200,80,0.55)"
+            />
+
+            <!-- Body -->
+            <ellipse cx="32" cy="38" rx="16" ry="14" fill="#F5B301"/>
+
+            <!-- Stripes -->
+            <path d="M18 36 H46" stroke="#2B2B2B" stroke-width="4" stroke-linecap="round"/>
+            <path d="M20 42 H44" stroke="#2B2B2B" stroke-width="4" stroke-linecap="round"/>
+
+            <!-- Head -->
+            <circle cx="32" cy="24" r="8" fill="#F5B301"/>
+
+            <!-- Eyes -->
+            <circle cx="29.5" cy="24" r="1.4" fill="#1a1a1a"/>
+            <circle cx="34.5" cy="24" r="1.4" fill="#1a1a1a"/>
+
+            <!-- Antennas -->
+            <path d="M28 18 C22 10, 14 12, 14 16"
+                  stroke="#2B2B2B" stroke-width="3" stroke-linecap="round"/>
+            <path d="M36 18 C42 10, 50 12, 50 16"
+                  stroke="#2B2B2B" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="name">
+          <span class="bee-word">Bee House</span>
+        </span>
+      </div>
+
+      <div class="badge" aria-hidden="true">♥</div>
+      <div class="headline" id="ht">Listen Now</div>
+
+      <div class="content" id="t">Nội dung hiển thị ở đây…</div>
+
+      <div class="player" aria-hidden="true">
+        <div class="meta">
+          <div class="title">Favorite Podcast</div>
+          <div class="sub">Eps.01 Mental Health</div>
+        </div>
+
+        <div class="progress">
+          <div class="time" id="timeL">13:10</div>
+          <div class="bar"><div class="dot"></div></div>
+          <div class="time" id="timeR">-09:21</div>
+        </div>
+
+        <div class="controls">
+          <div class="btn">⟲</div>
+          <div class="btn">⏮</div>
+          <div class="btn big" id="playBtn">⏸</div>
+          <div class="btn">⏭</div>
+          <div class="btn">⇄</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./confetti.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const mode = (params.get("mode") || "tiktok").toLowerCase(); // tiktok|youtube
+    const W = Number(params.get("w") || 1080);
+    const H = Number(params.get("h") || 1920);
+
+    // Mode-specific typography & card size
+    const root = document.documentElement;
+    const overlay = document.querySelector(".overlay");
+    if (mode === "youtube") {
+      root.style.setProperty("--cardW", "68vw");
+      root.style.setProperty("--cardH", "64vh");
+      root.style.setProperty("--headlineSize", "58px");
+      root.style.setProperty("--textSize", "40px");
+      root.style.setProperty("--pad", "42px");
+      root.style.setProperty("--clampLines", "5");
+    } else { // tiktok
+      root.style.setProperty("--cardW", "84vw");
+      root.style.setProperty("--cardH", "72vh");
+      root.style.setProperty("--headlineSize", "64px");
+      root.style.setProperty("--textSize", "44px");
+      root.style.setProperty("--pad", "46px");
+      root.style.setProperty("--clampLines", "10");
+    }
+
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    canvas.width = W; canvas.height = H;
+
+    // --- TEXT fallback
+    const tEl = document.getElementById("t");
+    const paramText = params.get("text");
+    const text = paramText ? decodeURIComponent(paramText) : (tEl.textContent || "").trim();
+    tEl.textContent = text;
+    const htEl = document.getElementById("ht");
+    const paramTextTitle = params.get("title");
+    const textTitle = paramTextTitle ? decodeURIComponent(paramTextTitle) : (htEl.textContent || "").trim();
+    htEl.textContent = textTitle;
+
+    // Random text animation (chill set)
+    const textAnims = ["anim-pop","anim-float","anim-shimmer","anim-pulse"];
+    function applyRandomTextAnim() {
+      for (const a of textAnims) tEl.classList.remove(a);
+      const pick = textAnims[Math.floor(Math.random() * textAnims.length)];
+      tEl.classList.add(pick);
+    }
+    applyRandomTextAnim();
+    setInterval(applyRandomTextAnim, 4500);
+
+    // Subtle fake progress animation (chạy cực nhẹ, không giật)
+    let prog = 0.46 + Math.random() * 0.18;
+    const progSpeed = 0.0006 + Math.random() * 0.0004; // chậm
+    function updateProgress(){
+      prog += progSpeed;
+      if (prog > 0.92) prog = 0.18;
+      root.style.setProperty("--progress", Math.round(prog * 100) + "%");
+    }
+
+    // Load background
+    const bg = new Image();
+    bg.src = new URL("./background.jpg", location.href).href;
+
+    function drawBg(){
+      const w = canvas.width, h = canvas.height;
+      const scale = Math.max(w/bg.width, h/bg.height);
+      const sw = bg.width * scale, sh = bg.height * scale;
+      const sx = (w - sw)/2, sy = (h - sh)/2;
+      ctx.drawImage(bg, sx, sy, sw, sh);
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.fillRect(0,0,w,h);
+    }
+
+    // Confetti helpers
+    const rand = (a,b)=> Math.random()*(b-a)+a;
+    const pickOne = (arr)=> arr[Math.floor(Math.random()*arr.length)];
+
+    const emojiList = ["✨","🎉","💖","🔥","🌸","🍀","⭐","💯","🥳","🎊","🌟","🎈","🍋","🫶","😺","🦊","🐣"];
+    const canShapeFromText = typeof confetti.shapeFromText === "function";
+    const canShapeFromPath = typeof confetti.shapeFromPath === "function";
+
+    const emojiShapes = canShapeFromText
+      ? emojiList.map(e => confetti.shapeFromText({ text: e, scalar: 1.2 }))
+      : null;
+
+    const customShapes = canShapeFromPath ? ([
+      confetti.shapeFromPath({ path: "M0 30 L15 0 L30 30 L15 22 Z" }),
+      confetti.shapeFromPath({ path: "M15 0 C23 0 30 7 30 15 C30 23 23 30 15 30 C7 30 0 23 0 15 C0 7 7 0 15 0 Z" }),
+      confetti.shapeFromPath({ path: "M15 0 L19 10 L30 10 L21 17 L24 30 L15 22 L6 30 L9 17 L0 10 L11 10 Z" }),
+      confetti.shapeFromPath({ path: "M0 15 L15 0 L30 15 L15 30 Z" }),
+    ]) : null;
+
+    function burst(opts){
+      confetti({
+        particleCount: opts.particleCount ?? 90,
+        spread: opts.spread ?? 100,
+        startVelocity: opts.startVelocity ?? 38,
+        ticks: opts.ticks ?? 220,
+        gravity: opts.gravity ?? 0.9,
+        scalar: opts.scalar ?? 1,
+        drift: opts.drift ?? 0,
+        origin: opts.origin ?? { x: 0.5, y: 0.7 },
+        angle: opts.angle,
+        shapes: opts.shapes,
+      });
+    }
+
+    // Presets (đã tối ưu nhẹ để không giật)
+    function presetBasicCannon(){
+      burst({ particleCount: 110, spread: 70, startVelocity: 48, origin: { x: 0.5, y: 0.92 } });
+    }
+    function presetRandomDirection(){
+      burst({ particleCount: 90, spread: 140, startVelocity: 32, angle: rand(0,360), origin: { x: rand(0.2,0.8), y: rand(0.25,0.75) } });
+    }
+    function presetRealisticLook(){
+      burst({ particleCount: 120, spread: 90, startVelocity: 38, gravity: 1.1, scalar: rand(0.9,1.15), drift: rand(-0.45,0.45), ticks: 250, origin: { x: rand(0.2,0.8), y: rand(0.25,0.6) } });
+    }
+    function presetFireworks(){
+      // nhẹ hơn bản cũ, tránh spike
+      const times = 2;
+      for (let i=0;i<times;i++){
+        setTimeout(() => {
+          burst({ particleCount: 70, spread: 300, startVelocity: 24, ticks: 220, gravity: 0.95, origin: { x: rand(0.2,0.8), y: rand(0.18,0.45) } });
+        }, i * 260);
+      }
+    }
+    function presetStars(){
+      const shapes = (customShapes && customShapes[2]) ? [customShapes[2]] : undefined;
+      burst({ particleCount: 90, spread: 110, startVelocity: 34, ticks: 240, scalar: 1.05, gravity: 0.95, shapes, origin: { x: rand(0.2,0.8), y: rand(0.25,0.55) } });
+    }
+    function presetSnow(){
+      burst({ particleCount: 140, spread: 40, startVelocity: 10, gravity: 0.75, ticks: 320, scalar: 0.72, drift: rand(-0.25,0.25), origin: { x: rand(0.15,0.85), y: 0.08 }, angle: 90 });
+    }
+    function presetSchoolPride(){
+      burst({ particleCount: 70, spread: 55, startVelocity: 44, origin: { x: 0.14, y: 0.92 }, angle: 60 });
+      burst({ particleCount: 70, spread: 55, startVelocity: 44, origin: { x: 0.86, y: 0.92 }, angle: 120 });
+    }
+    function presetCustomShapes(){
+      if (customShapes) burst({ particleCount: 100, spread: 120, startVelocity: 36, ticks: 240, scalar: rand(0.95, 1.2), shapes: [pickOne(customShapes)], origin: { x: rand(0.2,0.8), y: rand(0.25,0.6) } });
+      else presetRealisticLook();
+    }
+    function presetEmoji(){
+      if (emojiShapes) burst({ particleCount: 70, spread: 120, startVelocity: 34, ticks: 250, gravity: 1.0, scalar: rand(0.95, 1.2), shapes: [pickOne(emojiShapes)], origin: { x: rand(0.2,0.8), y: rand(0.25,0.55) } });
+      else presetBasicCannon();
+    }
+
+    const presets = [
+      presetBasicCannon,
+      presetRandomDirection,
+      presetRealisticLook,
+      presetFireworks,
+      presetStars,
+      presetSnow,
+      presetSchoolPride,
+      presetCustomShapes,
+      presetEmoji,
+    ];
+
+    // ---- 30fps throttle to avoid jitter in xvfb + x11grab
+    let lastConfetti = 0;
+    let lastRender = 0;
+
+    function loop(ts){
+      if (ts - lastRender < 33) { // ~30fps
+        requestAnimationFrame(loop);
+        return;
+      }
+      lastRender = ts;
+
+      drawBg();
+      updateProgress();
+
+      if (ts - lastConfetti > 1100) { // thưa hơn để nhẹ CPU
+        pickOne(presets)();
+        lastConfetti = ts;
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    bg.onload = () => requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
