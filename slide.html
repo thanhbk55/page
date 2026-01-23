@@ -2,58 +2,85 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Vertical Story Slides</title>
   <style>
+    :root{
+      --pad: 16px;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
     body {
       margin: 0;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       background: #fff;
       color: #111;
-      overflow: hidden;
+      overflow: hidden; /* mỗi page tự scroll */
     }
 
     .container {
-      height: 100vh;
+      height: 100dvh; /* mobile-friendly */
       width: 100vw;
       position: relative;
     }
 
     .page {
-      height: 100vh;
+      height: 100dvh;
       width: 100vw;
-      padding: 24px;
-      box-sizing: border-box;
+
+      padding:
+        calc(var(--pad) + env(safe-area-inset-top))
+        calc(var(--pad) + env(safe-area-inset-right))
+        calc(var(--pad) + env(safe-area-inset-bottom))
+        calc(var(--pad) + env(safe-area-inset-left));
+
       display: none;
       flex-direction: column;
-      justify-content: space-between;
+      gap: 12px;
     }
 
     .page.active {
       display: flex;
     }
 
+    /* Content sẽ chiếm phần còn lại và scroll nếu dài */
     .content {
-      font-size: 1.2rem;
-      line-height: 1.6;
+      flex: 1;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+
+      font-size: clamp(15px, 3.9vw, 18px);
+      line-height: 1.65;
+    }
+
+    .content h2{
+      margin: 0 0 10px 0;
+      font-size: clamp(18px, 4.8vw, 22px);
+      line-height: 1.25;
+    }
+
+    .footer-wrap{
+      flex: 0 0 auto;
     }
 
     .footer {
       display: flex;
-      justify-content: space-between;
       gap: 12px;
     }
 
     button {
       flex: 1;
-      padding: 14px;
-      font-size: 1rem;
+      padding: 14px 12px;
+      font-size: 16px;
       border: none;
-      border-radius: 12px;
+      border-radius: var(--radius);
       background: #f5c542;
       color: #111;
-      font-weight: bold;
+      font-weight: 700;
       cursor: pointer;
+      touch-action: manipulation; /* giảm delay tap */
     }
 
     button:disabled {
@@ -64,7 +91,8 @@
     .page-number {
       text-align: center;
       opacity: 0.6;
-      font-size: 0.9rem;
+      font-size: 13px;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -76,23 +104,22 @@
     <div class="content">
       <h2>① Mở đầu (Slide 1) ~30s</h2>
       みなさん、こんにちは。<br/>
-本日はありがとうございます。<br/><br/>
-今日のテーマは、<br/>
-<strong>「1クリックで、業務を自動化」</strong> です。<br/>
-<br/>
-AIは便利ですが、業務で使うとき、まだ面倒な場合があります。<br/><br/>
+      本日はありがとうございます。<br/><br/>
+      今日のテーマは、<br/>
+      <strong>「1クリックで、業務を自動化」</strong> です。<br/><br/>
+      AIは便利ですが、業務で使うとき、まだ面倒な場合があります。<br/><br/>
 
-<h2>② 現状の課題：Tab Hell (Slide 2) ~50s</h2>
+      <h2>② 現状の課題：Tab Hell (Slide 2) ~50s</h2>
       その一因が、タブ切り替えです。みなさんも会ったことがあると思いますが<br/>
-AIを使うたびに<br/>
-タブを切り替え、<br/>
-コピー＆ペーストの繰り返して、<br/>
-は時間がかかって、辛いです。<br/>
-<br/>
-結果として、<br/>
-<strong>Workflowが分断され、集中できなくなる。</strong> 
+      AIを使うたびに<br/>
+      タブを切り替え、<br/>
+      コピー＆ペーストの繰り返して、<br/>
+      は時間がかかって、辛いです。<br/><br/>
+      結果として、<br/>
+      <strong>Workflowが分断され、集中できなくなる。</strong>
     </div>
-    <div>
+
+    <div class="footer-wrap">
       <div class="page-number">1 / 7</div>
       <div class="footer">
         <button disabled>Back</button>
@@ -103,12 +130,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      📖 Trang 2  
+      📖 Trang 2
       <br><br>
-      Tin nhắn đến muộn, chỉ vỏn vẹn một câu:  
+      Tin nhắn đến muộn, chỉ vỏn vẹn một câu:
       “Em ngủ chưa?”
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">2 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -119,12 +146,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      ☕ Trang 3  
+      ☕ Trang 3
       <br><br>
-      Quán cà phê quen, chỗ ngồi cũ,  
+      Quán cà phê quen, chỗ ngồi cũ,
       nhưng người đối diện đã không còn như trước.
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">3 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -135,12 +162,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      💭 Trang 4  
+      💭 Trang 4
       <br><br>
-      Có những lời chưa kịp nói ra  
+      Có những lời chưa kịp nói ra
       thì thời gian đã lặng lẽ mang đi.
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">4 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -151,12 +178,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      🌧 Trang 5  
+      🌧 Trang 5
       <br><br>
-      Mưa lại rơi, giống hệt hôm đó.  
+      Mưa lại rơi, giống hệt hôm đó.
       Chỉ khác là người đã không còn chờ.
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">5 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -167,12 +194,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      🕯 Trang 6  
+      🕯 Trang 6
       <br><br>
-      Cô mỉm cười, khép lại ký ức cũ,  
+      Cô mỉm cười, khép lại ký ức cũ,
       lòng nhẹ hơn một chút.
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">6 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -183,12 +210,12 @@ AIを使うたびに<br/>
 
   <div class="page">
     <div class="content">
-      🌅 Trang 7  
+      🌅 Trang 7
       <br><br>
-      Buổi sáng mới bắt đầu.  
+      Buổi sáng mới bắt đầu.
       Có lẽ, mọi chuyện rồi sẽ ổn thôi.
     </div>
-    <div>
+    <div class="footer-wrap">
       <div class="page-number">7 / 7</div>
       <div class="footer">
         <button onclick="back()">Back</button>
@@ -210,15 +237,11 @@ AIを使うたびに<br/>
   }
 
   function next() {
-    if (current < pages.length - 1) {
-      show(current + 1);
-    }
+    if (current < pages.length - 1) show(current + 1);
   }
 
   function back() {
-    if (current > 0) {
-      show(current - 1);
-    }
+    if (current > 0) show(current - 1);
   }
 </script>
 
