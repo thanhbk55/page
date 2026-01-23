@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vertical Story Slides</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fff;
+      color: #111;
+      overflow: hidden;
+    }
+
+    .container {
+      height: 100vh;
+      width: 100vw;
+      position: relative;
+    }
+
+    .page {
+      height: 100vh;
+      width: 100vw;
+      padding: 24px;
+      box-sizing: border-box;
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .page.active {
+      display: flex;
+    }
+
+    .content {
+      font-size: 1.2rem;
+      line-height: 1.6;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    button {
+      flex: 1;
+      padding: 14px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 12px;
+      background: #f5c542;
+      color: #111;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .page-number {
+      text-align: center;
+      opacity: 0.6;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="page active">
+    <div class="content">
+      <h2>① Mở đầu (Slide 1) ~30s</h2>
+      みなさん、こんにちは。<br/>
+本日はありがとうございます。<br/><br/>
+今日のテーマは、<br/>
+<strong>「1クリックで、業務を自動化」</strong> です。<br/>
+<br/>
+AIは便利ですが、業務で使うとき、まだ面倒な場合があります。<br/><br/>
+
+<h2>② 現状の課題：Tab Hell (Slide 2) ~50s</h2>
+      その一因が、タブ切り替えです。みなさんも会ったことがあると思いますが<br/>
+AIを使うたびに<br/>
+タブを切り替え、<br/>
+コピー＆ペーストの繰り返して、<br/>
+は時間がかかって、辛いです。<br/>
+<br/>
+結果として、<br/>
+<strong>Workflowが分断され、集中できなくなる。</strong> 
+    </div>
+    <div>
+      <div class="page-number">1 / 7</div>
+      <div class="footer">
+        <button disabled>Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      📖 Trang 2  
+      <br><br>
+      Tin nhắn đến muộn, chỉ vỏn vẹn một câu:  
+      “Em ngủ chưa?”
+    </div>
+    <div>
+      <div class="page-number">2 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      ☕ Trang 3  
+      <br><br>
+      Quán cà phê quen, chỗ ngồi cũ,  
+      nhưng người đối diện đã không còn như trước.
+    </div>
+    <div>
+      <div class="page-number">3 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      💭 Trang 4  
+      <br><br>
+      Có những lời chưa kịp nói ra  
+      thì thời gian đã lặng lẽ mang đi.
+    </div>
+    <div>
+      <div class="page-number">4 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      🌧 Trang 5  
+      <br><br>
+      Mưa lại rơi, giống hệt hôm đó.  
+      Chỉ khác là người đã không còn chờ.
+    </div>
+    <div>
+      <div class="page-number">5 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      🕯 Trang 6  
+      <br><br>
+      Cô mỉm cười, khép lại ký ức cũ,  
+      lòng nhẹ hơn một chút.
+    </div>
+    <div>
+      <div class="page-number">6 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button onclick="next()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="content">
+      🌅 Trang 7  
+      <br><br>
+      Buổi sáng mới bắt đầu.  
+      Có lẽ, mọi chuyện rồi sẽ ổn thôi.
+    </div>
+    <div>
+      <div class="page-number">7 / 7</div>
+      <div class="footer">
+        <button onclick="back()">Back</button>
+        <button disabled>Next</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const pages = document.querySelectorAll('.page');
+  let current = 0;
+
+  function show(index) {
+    pages[current].classList.remove('active');
+    current = index;
+    pages[current].classList.add('active');
+  }
+
+  function next() {
+    if (current < pages.length - 1) {
+      show(current + 1);
+    }
+  }
+
+  function back() {
+    if (current > 0) {
+      show(current - 1);
+    }
+  }
+</script>
+
+</body>
+</html>
