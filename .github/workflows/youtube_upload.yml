@@ -15,7 +15,7 @@ on:
       yt_privacy:
         description: "private|unlisted|public"
         required: false
-        default: "private"
+        default: "public"
       video_mode:
         description: "normal|short (short = trim to <= 3 minutes)"
         required: false
