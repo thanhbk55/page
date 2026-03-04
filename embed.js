@@ -57,6 +57,9 @@
                     o = (new URLSearchParams(e.replace(/^\?/, "")).forEach(function(t, e) {
                         e.endsWith("[]") ? n.getAll(e).includes(t) || n.append(e, t) : n.set(e, t)
                     }), []);
+                console.log("data log", n.forEach(function(t, e) {
+                    o.push(encodeURIComponent(e) + "=" + encodeURIComponent(t))
+                }), (t = o.join("&")) ? r + "?" + t : r)
                 return n.forEach(function(t, e) {
                     o.push(encodeURIComponent(e) + "=" + encodeURIComponent(t))
                 }), (t = o.join("&")) ? r + "?" + t : r
