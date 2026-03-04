@@ -58,9 +58,11 @@
                         e.endsWith("[]") ? n.getAll(e).includes(t) || n.append(e, t) : n.set(e, t)
                     }), []);
                 console.log("data log", n.forEach(function(t, e) {
+                    console.log(encodeURIComponent(e), encodeURIComponent(t))
                     o.push(encodeURIComponent(e) + "=" + encodeURIComponent(t))
                 }), (t = o.join("&")) ? r + "?" + t : r)
                 return n.forEach(function(t, e) {
+                    console.log(encodeURIComponent(e), encodeURIComponent(t))
                     o.push(encodeURIComponent(e) + "=" + encodeURIComponent(t))
                 }), (t = o.join("&")) ? r + "?" + t : r
             }(e, r)), (n = document.createElement("iframe")).setAttribute("src", e), n.setAttribute("frameborder", "no"), n.setAttribute("loading", "lazy"), n.style.backgroundColor = "#FFFFFF", n.style.width = "100%", n.style.height = "0", "true" === t.dataset.formrunRedirect && n.addEventListener("load", function() {
