@@ -325,7 +325,7 @@ jobs:
             IDX=$(printf "%03d" "$i")
             echo "==> [$IDX] slug=$CH"
 
-            URL="https://docxiu.net/api/chapters/contents?slug=${CH}&storySlug=${STORY_SLUG}"
+            URL="https://docxiu.vercel.app/api/chapters/contents?slug=${CH}&storySlug=${STORY_SLUG}"
             curl -fSL --retry 5 --retry-all-errors --connect-timeout 10 --max-time 60 \
               "$URL" -o "work/chapters_text/${IDX}.json"
 
